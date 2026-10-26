@@ -1,0 +1,9 @@
+# Never commit personal training data
+*.fit
+*.fit.txt
+data/
+backups/
+fitplan-backup-*.json
+progress*.json
+progress*.md
+.DS_Store
