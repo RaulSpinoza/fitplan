@@ -8,44 +8,66 @@
 <meta name="apple-mobile-web-app-title" content="FitPlan">
 <meta name="theme-color" content="#1f2a44">
 <link rel="manifest" href="manifest.json">
-<title>FitPlan – iPhone test</title>
+<title>FitPlan – iPhone test v2</title>
 <style>
  body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:calc(env(safe-area-inset-top) + 16px) 16px 24px;background:#1f2a44;color:#fff}
- h1{font-size:22px} .row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #ffffff22}
- .ok{color:#7CFC9A}.bad{color:#ff7b7b} button{font-size:16px;padding:12px;border-radius:10px;border:0;margin-top:16px;width:100%}
+ h1{font-size:22px}.row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #ffffff22}
+ .ok{color:#7CFC9A}.bad{color:#ff7b7b}button{font-size:16px;padding:12px;border-radius:10px;border:0;margin-top:16px;width:100%}
  pre{white-space:pre-wrap;font-size:12px;background:#0004;padding:8px;border-radius:8px}
 </style>
 </head>
 <body>
-<h1>FitPlan – iPhone capability test</h1>
+<h1>FitPlan – iPhone test v2</h1>
+<div id="persist"></div>
 <div id="r"></div>
-<button id="pick">Test file picker (pick a FIT from iCloud Drive → RunGap → Exports)</button>
+<button id="pick">Pick FIT files (iCloud Drive → RunGap → Exports)</button>
 <input type="file" id="f" multiple hidden>
 <pre id="out"></pre>
+<button id="clr">Clear saved test data</button>
 <script>
 const r=document.getElementById('r'),out=document.getElementById('out');
 const row=(k,v)=>r.insertAdjacentHTML('beforeend',`<div class="row"><span>${k}</span><b class="${v?'ok':'bad'}">${v?'YES':'NO'}</b></div>`);
-const standalone=window.navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
-row('Opened from Home Screen (standalone)',standalone);
-row('Service worker supported','serviceWorker' in navigator);
-row('IndexedDB available','indexedDB' in window);
+const fmt=d=>d?new Date(d).toLocaleString('de-DE'):'–';
+let db=null;
+row('Opened from Home Screen (standalone)',navigator.standalone===true||matchMedia('(display-mode: standalone)').matches);
 (async()=>{
   if('serviceWorker' in navigator){try{await navigator.serviceWorker.register('sw.js');row('Service worker registered (offline)',true)}catch(e){row('Service worker registered (offline)',false)}}
-  if(navigator.storage&&navigator.storage.persist){row('Persistent storage granted',await navigator.storage.persist())}else row('Persistent storage API',false);
-  if(navigator.storage&&navigator.storage.estimate){const e=await navigator.storage.estimate();out.textContent=`Storage quota ≈ ${(e.quota/1e6).toFixed(0)} MB\n`}
-  // IndexedDB write/read test
-  const req=indexedDB.open('fitplan-test',1);req.onupgradeneeded=()=>req.result.createObjectStore('k');
-  req.onsuccess=()=>{const db=req.result,tx=db.transaction('k','readwrite');tx.objectStore('k').put(Date.now(),'last');
-    const g=db.transaction('k').objectStore('k').get('last');g.onsuccess=()=>row('IndexedDB write/read',!!g.result)};
+  if(navigator.storage&&navigator.storage.persist)row('Persistent storage granted',await navigator.storage.persist());
+  const req=indexedDB.open('fitplan-test',2);
+  req.onupgradeneeded=()=>{const d=req.result;
+    if(!d.objectStoreNames.contains('k'))d.createObjectStore('k');
+    if(!d.objectStoreNames.contains('files'))d.createObjectStore('files',{keyPath:'name'});};
+  req.onerror=()=>row('IndexedDB open',false);
+  req.onsuccess=()=>{db=req.result;
+    const st=db.transaction('k').objectStore('k');
+    const g1=st.get('first'),g2=st.get('last'),g3=st.get('opens');
+    g3.onsuccess=()=>{
+      const now=Date.now(),opens=(g3.result||0)+1,first=g1.result||now;
+      const w=db.transaction('k','readwrite').objectStore('k');
+      w.put(first,'first');w.put(now,'last');w.put(opens,'opens');
+      document.getElementById('persist').innerHTML=
+       `<div class="row"><span>App opens counted</span><b class="${opens>1?'ok':''}">${opens}</b></div>`+
+       `<div class="row"><span>First opened</span><b>${fmt(first)}</b></div>`+
+       `<div class="row"><span>Previous open</span><b>${fmt(g2.result)}</b></div>`;
+      const all=db.transaction('files').objectStore('files').getAll();
+      all.onsuccess=()=>{
+        row('Saved FIT files found after reopen',all.result.length>0);
+        if(all.result.length){out.textContent+=`Stored on this iPhone (${all.result.length}):\n`;
+          all.result.sort((a,b)=>a.name<b.name?-1:1).forEach(x=>out.textContent+=`• ${x.name} – ${x.size} bytes – imported ${fmt(x.at)}\n`);}
+      };
+    };
+  };
 })();
 document.getElementById('pick').onclick=()=>document.getElementById('f').click();
 document.getElementById('f').onchange=async e=>{
   for(const file of e.target.files){
     const b=new Uint8Array(await file.arrayBuffer());
-    const sig=String.fromCharCode(...b.slice(8,12));
-    out.textContent+=`${file.name}: ${b.length} bytes, header "${sig}" ${sig==='.FIT'?'✔ valid FIT':'✘ not FIT'}\n`;
+    const ok=String.fromCharCode(...b.slice(8,12))==='.FIT';
+    if(ok&&db)db.transaction('files','readwrite').objectStore('files').put({name:file.name,size:b.length,at:Date.now(),data:b.buffer});
+    out.textContent+=`${file.name}: ${b.length} bytes ${ok?'✔ valid FIT – saved':'✘ not FIT'}\n`;
   }
 };
+document.getElementById('clr').onclick=()=>{if(db)db.close();indexedDB.deleteDatabase('fitplan-test');out.textContent='Cleared. Close and reopen the app.\n';};
 </script>
 </body>
 </html>
