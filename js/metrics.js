@@ -5,6 +5,7 @@ import { iso } from './util.js';
 const SPORT = { 1: 'run', 2: 'bike', 4: 'strength', 10: 'strength', 11: 'walk', 17: 'hike', 5: 'swim' };
 const SUB = { 1: 'treadmill', 2: 'street', 3: 'trail', 6: 'indoor', 20: 'strength', 26: 'cardio' };
 const toDate = ts => new Date((ts + FIT_EPOCH) * 1000);
+const r1 = x => Math.round(x * 10) / 10;
 
 export const zoneOf = (hr, Z) => hr <= Z[0] ? 0 : hr <= Z[1] ? 1 : hr <= Z[2] ? 2 : hr <= Z[3] ? 3 : 4;
 
@@ -77,4 +78,3 @@ export function summarize(m, athlete, fileName = '') {
     session_id: null, role: null, manual: false, imported_at: new Date().toISOString()
   };
 }
-const r1 = x => Math.round(x * 10) / 10;

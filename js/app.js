@@ -3,15 +3,17 @@ import { validatePlan, mergePlan, SCHEMA } from './plan.js';
 import { decode, isFit } from './fit.js';
 import { summarize } from './metrics.js';
 import { autoAssign, proposeStatus, isDuplicate } from './match.js';
+import { buildProgress, toMarkdown, PAIN_LOCS, ASSESS_PROMPT } from './progress.js';
 import { today, addDays, daysBetween, fmt, fmtShort, mondayOf, hhmm, fmtPace, r1, esc } from './util.js';
 
-const APP_VERSION = '1.1.0-M2';
+const APP_VERSION = '1.2.0-M3';
 const DEFAULT_ATHLETE = { hr_max: 168, hr_rest: 46, zones: [117, 130, 142, 154] };
 const ICON = { run: '🏃', bike: '🚴', strength: '🏋️', ocr: '🧗', mobility: '🧘', rest: '😴', race: '🏁', walk: '🚶', hike: '🥾', swim: '🏊', other: '•' };
 const ST = { pending: '○', done: '✔', modified: '◐', skipped: '✕' };
 
-const S = { tab: 'today', day: today(), weekStart: mondayOf(today()), sessions: [], logs: {}, races: [], plans: [], acts: [],
-  athlete: DEFAULT_ATHLETE, pendingImport: null, fitStage: null, lastBackup: null, backupFile: null };
+const S = { tab: 'today', day: today(), weekStart: mondayOf(today()), sessions: [], logs: {}, races: [], plans: [], acts: [], checkins: {},
+  athlete: DEFAULT_ATHLETE, pendingImport: null, fitStage: null, lastBackup: null, backupFile: null,
+  ciOpen: false, repWin: '14', report: null, lastExport: null };
 const $ = sel => document.querySelector(sel);
 const view = () => $('#view');
 
@@ -21,8 +23,10 @@ async function load() {
   S.races = (await db.all('races')).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   S.plans = (await db.all('plans')).sort((a, b) => a.plan_version - b.plan_version);
   S.acts = (await db.all('activities')).sort((a, b) => a.start_ts - b.start_ts);
+  S.checkins = Object.fromEntries((await db.all('checkins')).map(c => [c.date, c]));
   S.athlete = await db.getMeta('athlete', DEFAULT_ATHLETE);
   S.lastBackup = await db.getMeta('last_backup', null);
+  S.lastExport = await db.getMeta('last_export', null);
 }
 const currentPlan = () => S.plans[S.plans.length - 1];
 const statusOf = id => S.logs[id]?.status || 'pending';
@@ -39,7 +43,7 @@ const sumZones = acts => acts.reduce((z, a) => z.map((v, i) => v + (a.zone_min?.
 // ---------- rendering ----------
 function render() {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-  ({ today: renderToday, week: renderWeek, races: renderRaces, import: renderImport, settings: renderSettings })[S.tab]();
+  ({ today: renderToday, week: renderWeek, races: renderRaces, report: renderReport, import: renderImport, settings: renderSettings })[S.tab]();
   refreshBanner();
   window.scrollTo(0, 0);
 }
@@ -101,6 +105,45 @@ function sessionCard(s) {
   </div>`;
 }
 
+// ---------- daily check-in ----------
+const opt = (vals, sel, lbl = v => v) => vals.map(v => `<option value="${v}" ${String(v) === String(sel ?? '') ? 'selected' : ''}>${lbl(v)}</option>`).join('');
+const range = (a, b) => [...Array(b - a + 1)].map((_, i) => a + i);
+function painRow(p = { loc: 'r_foot', score: 1 }) {
+  return `<div class="prow"><select class="ploc">${opt(Object.keys(PAIN_LOCS), p.loc, k => PAIN_LOCS[k])}</select>
+    <select class="pscore">${opt(range(0, 10), p.score, v => v + '/10')}</select><button class="x" data-act="pdel">✕</button></div>`;
+}
+function checkinSummary(c) {
+  const p = [c.rpe != null && `RPE ${c.rpe}`, c.sleep_h != null && `😴 ${c.sleep_h} h${c.sleep_q ? ' · q' + c.sleep_q : ''}`, c.energy != null && `⚡ ${c.energy}/5`, c.rhr && `♥ ${c.rhr}`].filter(Boolean).join(' · ');
+  const pain = (c.pain || []).filter(x => x.score > 0);
+  return `<div>${p || '<span class="muted">–</span>'}</div><div class="${pain.some(x => x.score >= 3) ? 'warn' : pain.length ? 'mild' : 'okt'}">${pain.length ? '🩹 ' + pain.map(x => `${esc(PAIN_LOCS[x.loc] || x.loc)} ${x.score}/10`).join(', ') : '✓ no pain'}</div>${c.note ? `<div class="muted small">📝 ${esc(c.note)}</div>` : ''}`;
+}
+function checkinCard(d) {
+  if (d > today()) return '';
+  const c = S.checkins[d];
+  if (!S.ciOpen) return c ? `<div class="card ci"><div class="sh"><b class="grow">🩺 Check-in</b><button class="mini" data-act="ciopen">Edit</button></div>${checkinSummary(c)}</div>`
+    : `<div class="card ci"><button class="primary" data-act="ciopen">🩺 Daily check-in</button></div>`;
+  const prev = c || S.checkins[addDays(d, -1)] || {};      // prefill pain from yesterday to make tracking fast
+  return `<div class="card ci"><b>🩺 Check-in · ${fmtShort(d)}</b>
+    <label>Day RPE (effort 1–10)<select id="ci_rpe"><option value="">–</option>${opt(range(1, 10), c?.rpe)}</select></label>
+    <label>Sleep (h)<input id="ci_sleep" type="number" inputmode="decimal" step="0.25" min="0" max="14" value="${c?.sleep_h ?? ''}"></label>
+    <label>Sleep quality<select id="ci_sq"><option value="">–</option>${opt(range(1, 5), c?.sleep_q, v => v + '/5')}</select></label>
+    <label>Energy<select id="ci_en"><option value="">–</option>${opt(range(1, 5), c?.energy, v => v + '/5')}</select></label>
+    <label>Resting HR<input id="ci_rhr" type="number" inputmode="numeric" min="30" max="120" value="${c?.rhr ?? ''}"></label>
+    <div class="ph"><b>Pain</b><span class="muted small">${!c && prev.pain?.length ? 'pre-filled from yesterday' : '0 = gone'}</span></div>
+    <div id="painlist">${(prev.pain || []).map(painRow).join('')}</div>
+    <button data-act="padd">➕ Add pain location</button>
+    <textarea id="ci_note" placeholder="Note (e.g. compression socks, how the foot felt)">${esc(c?.note || '')}</textarea>
+    <div class="acts"><button class="primary" data-act="cisave">Save</button><button data-act="ciclose">Cancel</button></div></div>`;
+}
+async function saveCheckin() {
+  const num = id => { const v = $(id).value; return v === '' ? null : +v; };
+  const pain = [...document.querySelectorAll('.prow')].map(r => ({ loc: r.querySelector('.ploc').value, score: +r.querySelector('.pscore').value }))
+    .filter((p, i, a) => a.findIndex(q => q.loc === p.loc) === i);
+  const c = { date: S.day, rpe: num('#ci_rpe'), sleep_h: num('#ci_sleep'), sleep_q: num('#ci_sq'), energy: num('#ci_en'), rhr: num('#ci_rhr'),
+    pain, note: $('#ci_note').value.trim(), updated_at: new Date().toISOString() };
+  await db.put('checkins', c); S.checkins[c.date] = c; S.ciOpen = false; toast('Check-in saved'); render();
+}
+
 function renderToday() {
   const d = S.day, list = sessionsOn(d), ph = phaseOn(d), extras = extrasOn(d);
   const raceToday = S.races.filter(r => r.date === d);
@@ -113,6 +156,7 @@ function renderToday() {
     ${raceToday.map(r => `<div class="card race-today">🏁 <b>${esc(r.name)}</b></div>`).join('')}
     ${list.length ? list.map(sessionCard).join('') : `<div class="card empty">${S.sessions.length ? 'No session planned. Rest day.' : 'No plan loaded yet. Go to <b>Import</b> to load a plan from Copilot.'}</div>`}
     ${extras.length ? `<div class="card extra"><b>➕ Unplanned workouts</b>${extras.map(a => `<div class="al">${actSummary(a)}</div>${zoneBar(a.zone_min)}`).join('')}<div class="muted small">Assign them in Import → Imported workouts.</div></div>` : ''}
+    ${checkinCard(d)}
     ${ph?.focus ? `<div class="muted small">Phase focus: ${esc(ph.focus)}</div>` : ''}`;
 }
 
@@ -121,12 +165,13 @@ function renderWeek() {
   let plan = 0, done = 0;
   const wActs = S.acts.filter(a => a.date >= ws && a.date <= we);
   const rows = days.map(d => {
-    const list = sessionsOn(d), races = S.races.filter(r => r.date === d), ex = extrasOn(d);
+    const list = sessionsOn(d), races = S.races.filter(r => r.date === d), ex = extrasOn(d), c = S.checkins[d];
     list.forEach(s => { if (s.type !== 'rest') { plan += s.duration_min || 0; if (['done', 'modified'].includes(statusOf(s.id))) done += s.duration_min || 0; } });
     const line = s => { const am = actsOf(s.id).reduce((t, a) => t + a.moving_min, 0);
       return `<div class="wi st-${statusOf(s.id)}">${ICON[s.type] || '•'} ${esc(s.title)} <span class="muted">${s.duration_min ? s.duration_min + '′' : ''}${am ? ' → ' + Math.round(am) + '′' : ''}</span> <span class="stb">${ST[statusOf(s.id)]}</span></div>`; };
+    const mp = c ? Math.max(0, ...(c.pain || []).map(p => p.score)) : null;
     return `<div class="wrow ${d === today() ? 'now' : ''}" data-act="goto" data-d="${d}">
-      <div class="wd">${fmtShort(d)}</div>
+      <div class="wd">${fmtShort(d)}${c ? `<div class="cidot ${mp >= 3 ? 'warn' : mp > 0 ? 'mild' : 'okt'}">🩺${mp ? ' ' + mp : ''}</div>` : ''}</div>
       <div class="grow">${races.map(r => `<div class="wi">🏁 ${esc(r.name)}</div>`).join('')}${list.map(line).join('')}${ex.map(a => `<div class="wi muted">➕ ${ICON[a.type] || '•'} ${Math.round(a.moving_min)}′ unplanned</div>`).join('') || (list.length || races.length ? '' : '<span class="muted">–</span>')}</div></div>`;
   }).join('');
   const actH = wActs.reduce((t, a) => t + a.moving_min, 0) / 60, runKm = wActs.filter(a => a.type === 'run').reduce((t, a) => t + (a.distance_km || 0), 0);
@@ -143,7 +188,7 @@ function renderWeek() {
       <div class="stats"><div><div class="mid">${r1(runKm)} km</div><div class="muted">run</div></div><div><div class="mid">${asc} m</div><div class="muted">D+</div></div><div><div class="mid">${trimp}</div><div class="muted">TRIMP</div></div></div>
       ${zoneBar(sumZones(wActs))}</div>
     <div class="card">${rows}</div>
-    <div class="muted small">Compliance = planned minutes of sessions marked done/modified ÷ planned minutes.</div>`;
+    <div class="muted small">Compliance = planned minutes of sessions marked done/modified ÷ planned minutes. 🩺 = check-in (number = max pain).</div>`;
 }
 
 function renderRaces() {
@@ -161,6 +206,59 @@ function renderRaces() {
           <span class="muted">${[r.distance_km && r.distance_km + ' km', r.elevation_m && r.elevation_m + ' m D+'].filter(Boolean).join(' · ')}</span>
           ${r.priority ? `<span class="prio p${esc(r.priority)}">${esc(r.priority)}</span>` : ''}</div>`).join('')}</div>`; }).join('') || '<div class="card empty">No races yet. They come with the plan import.</div>'}
     ${phases.length ? `<h2>Phases</h2><div class="card">${phases.map(p => `<div class="rrow ${p.from <= t && t <= p.to ? 'now' : ''}"><b>${esc(p.name)}</b><span class="muted">${fmt(p.from)} – ${fmt(p.to)}</span></div><div class="muted small pad">${esc(p.focus || '')}</div>`).join('')}</div>` : ''}`;
+}
+
+// ---------- Report tab (progress export for Copilot) ----------
+function reportWindow() {
+  const to = today(), cp = currentPlan();
+  if (S.repWin === 'plan' && cp) return { from: cp.valid_from > to ? to : cp.valid_from, to };
+  return { from: addDays(to, -(+S.repWin || 14) + 1), to };
+}
+function prepareReport() {
+  const { from, to } = reportWindow();
+  const p = buildProgress({ from, to, todayStr: today(), sessions: S.sessions, logs: S.logs, acts: S.acts, checkins: Object.values(S.checkins),
+    races: S.races, plan: currentPlan(), athlete: S.athlete, appVersion: APP_VERSION });
+  const md = toMarkdown(p), tag = `${from}_${to}`;
+  S.report = { p, md, json: JSON.stringify(p, null, 1),
+    mdFile: new File([md], `progress_${tag}.md`, { type: 'text/plain' }),
+    jsonFile: new File([JSON.stringify(p, null, 1)], `progress_${tag}.json`, { type: 'application/json' }) };
+}
+function renderReport() {
+  prepareReport();
+  const { p, md } = S.report, s = p.summary, cp = currentPlan();
+  view().innerHTML = `<h2>Progress report</h2>
+    <div class="card">
+      <label>Period<select id="repwin">${opt(['7', '14', '28', ...(cp ? ['plan'] : [])], S.repWin, v => v === 'plan' ? `Since plan v${cp.plan_version} (${fmt(cp.valid_from)})` : `Last ${v} days`)}</select></label>
+      <div class="muted small">${fmt(p.window.from)} – ${fmt(p.window.to)}${S.lastExport ? ` · last export ${fmt(S.lastExport)}` : ''}</div>
+      <div class="stats"><div><div class="mid">${s.done + s.modified}/${s.sessions_planned}</div><div class="muted">sessions</div></div>
+        <div><div class="mid">${s.missed + s.skipped}</div><div class="muted">missed/skip</div></div>
+        <div><div class="mid">${s.checkin_days}/${p.window.days}</div><div class="muted">check-ins</div></div>
+        <div><div class="mid">${s.load.acwr ?? '–'}</div><div class="muted">ACWR</div></div></div>
+      ${s.flags.length ? `<div class="warn small">⚠️ ${s.flags.map(esc).join('<br>⚠️ ')}</div>` : ''}
+      <button class="primary" data-act="copyrep">📋 Copy prompt + report for Copilot</button>
+      <button data-act="sharemd">📤 Share progress.md</button>
+      <button data-act="sharejson">📤 Share progress.json</button>
+    </div>
+    <div class="muted small pad">Paste the copied text into Copilot. It asks for an assessment and, if needed, a new plan.json that you import here.</div>
+    <div class="card"><b>Preview</b><pre class="md">${esc(md)}</pre></div>`;
+}
+async function markExport() { S.lastExport = today(); await db.setMeta('last_export', S.lastExport); }
+function shareFile(file) {
+  if (navigator.canShare?.({ files: [file] })) {
+    navigator.share({ files: [file], title: file.name }).then(async () => { await markExport(); toast('Shared'); })
+      .catch(e => { if (e.name !== 'AbortError') { download(file); markExport(); } });
+  } else { download(file); markExport(); }
+}
+function copyReport() {
+  const text = `${ASSESS_PROMPT}\n\n${S.report.md}`;
+  const ok = async () => { await markExport(); toast('Copied – paste into Copilot'); };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(ok).catch(() => fallbackCopy(text) && ok());
+  else if (fallbackCopy(text)) ok();
+}
+function fallbackCopy(text) {
+  const t = Object.assign(document.createElement('textarea'), { value: text }); t.setAttribute('readonly', ''); t.style.cssText = 'position:fixed;top:-1000px';
+  document.body.appendChild(t); t.select(); t.setSelectionRange(0, text.length); const r = document.execCommand('copy'); t.remove();
+  if (!r) toast('Copy failed – use Share instead'); return r;
 }
 
 // ---------- Import tab ----------
@@ -304,7 +402,6 @@ async function stageFit(files) {
       if (!dup) batchActs.push(act);
     } catch (e) { rows.push({ file: f.name, err: e.message }); }
   }
-  // Propose assignments per day together with already imported workouts of that day
   for (const d of new Set(batchActs.map(a => a.date))) {
     const res = autoAssign([...S.acts.filter(a => a.date === d), ...batchActs.filter(a => a.date === d)], sessionsOn(d));
     batchActs.filter(a => a.date === d).forEach(a => Object.assign(a, res[a.id]));
@@ -322,7 +419,7 @@ async function applyFit() {
   toast(`${news.length} workout${news.length === 1 ? '' : 's'} imported`); render();
 }
 
-// Re-run auto matching for given days (manual links kept) and refresh auto statuses.
+// Re-run auto matching for given days (manual links kept unless their session vanished) and refresh auto statuses.
 async function reassignDays(days) {
   const ops = [], touched = new Set();
   for (const d of days) {
@@ -332,7 +429,6 @@ async function reassignDays(days) {
     for (const a of dayActs) {
       const r = res[a.id];
       if (r && (r.session_id !== a.session_id || r.role !== a.role)) { Object.assign(a, r); ops.push({ store: 'activities', put: a }); }
-      if (a.session_id) touched.add(a.session_id);
     }
     sessionsOn(d).forEach(s => touched.add(s.id));
   }
@@ -388,13 +484,21 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act],[data-tab]'); if (!el || el.tagName === 'SELECT') return;
-  if (el.dataset.tab) { S.tab = el.dataset.tab; if (S.tab === 'today') S.day = today(); return render(); }
+  if (el.dataset.tab) { S.tab = el.dataset.tab; S.ciOpen = false; if (S.tab === 'today') S.day = today(); return render(); }
   const { act } = el.dataset;
-  if (act === 'day') { const n = +el.dataset.n; S.day = n === 0 ? today() : addDays(S.day, n); render(); }
+  if (act === 'day') { const n = +el.dataset.n; S.day = n === 0 ? today() : addDays(S.day, n); S.ciOpen = false; render(); }
   else if (act === 'week') { const n = +el.dataset.n; S.weekStart = n === 0 ? mondayOf(today()) : addDays(S.weekStart, n); render(); }
-  else if (act === 'goto') { S.day = el.dataset.d; S.tab = 'today'; render(); }
+  else if (act === 'goto') { S.day = el.dataset.d; S.tab = 'today'; S.ciOpen = false; render(); }
   else if (act === 'status') setStatus(el.dataset.id, el.dataset.st);
   else if (act === 'note') setNote(el.dataset.id);
+  else if (act === 'ciopen') { S.ciOpen = true; render(); setTimeout(() => $('.ci')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50); }
+  else if (act === 'ciclose') { S.ciOpen = false; render(); }
+  else if (act === 'cisave') saveCheckin();
+  else if (act === 'padd') $('#painlist').insertAdjacentHTML('beforeend', painRow());
+  else if (act === 'pdel') el.closest('.prow').remove();
+  else if (act === 'copyrep') copyReport();
+  else if (act === 'sharemd') shareFile(S.report.mdFile);
+  else if (act === 'sharejson') shareFile(S.report.jsonFile);
   else if (act === 'pickfit') $('#fitfile').click();
   else if (act === 'applyfit') applyFit();
   else if (act === 'cancelfit') { S.fitStage = null; render(); }
@@ -417,6 +521,7 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'fitfile' && t.files.length) { toast('Reading files…'); stageFit([...t.files]); }
+  else if (t.id === 'repwin') { S.repWin = t.value; render(); }
   else if (t.dataset.act === 'stageassign') { const a = S.fitStage.rows[+t.dataset.k].act; a.session_id = t.value || null; a.role = null; a.manual = true; }
   else if (t.dataset.act === 'reassign') reassignAct(t.dataset.id, t.value);
   else if (t.id === 'planfile' && t.files[0]) stagePlan(await t.files[0].text());
@@ -430,18 +535,18 @@ document.addEventListener('change', async e => {
   }
 });
 
-// Swipe left/right on Today & Week
+// Swipe left/right on Today & Week (not while editing the check-in)
 let tx0 = null;
 document.addEventListener('touchstart', e => { tx0 = e.touches[0].clientX; }, { passive: true });
 document.addEventListener('touchend', e => {
   if (tx0 === null) return; const dx = e.changedTouches[0].clientX - tx0; tx0 = null;
-  if (Math.abs(dx) < 70 || e.target.closest('textarea,input,select,.zbar')) return;
+  if (Math.abs(dx) < 70 || S.ciOpen || e.target.closest('textarea,input,select,.zbar,pre')) return;
   if (S.tab === 'today') { S.day = addDays(S.day, dx < 0 ? 1 : -1); render(); }
   else if (S.tab === 'week') { S.weekStart = addDays(S.weekStart, dx < 0 ? 7 : -7); render(); }
 });
 
 let lastDay = today();
-document.addEventListener('visibilitychange', () => { if (!document.hidden && lastDay !== today()) { lastDay = today(); S.day = today(); S.weekStart = mondayOf(today()); render(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && lastDay !== today()) { lastDay = today(); S.day = today(); S.weekStart = mondayOf(today()); S.ciOpen = false; render(); } });
 
 (async () => {
   if ('serviceWorker' in navigator) {

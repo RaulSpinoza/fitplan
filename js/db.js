@@ -1,6 +1,6 @@
-// Minimal IndexedDB wrapper (no external library). v2 adds "activities".
-const NAME = 'fitplan', VER = 2;
-const STORES = { meta: 'key', plans: 'plan_version', sessions: 'id', races: 'id', logs: 'id', activities: 'id' };
+// Minimal IndexedDB wrapper (no external library). v2: activities, v3: checkins.
+const NAME = 'fitplan', VER = 3;
+const STORES = { meta: 'key', plans: 'plan_version', sessions: 'id', races: 'id', logs: 'id', activities: 'id', checkins: 'date' };
 let dbp;
 function open() {
   if (dbp) return dbp;
