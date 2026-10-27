@@ -1,6 +1,6 @@
-// Minimal IndexedDB wrapper (no external library).
-const NAME = 'fitplan', VER = 1;
-const STORES = { meta: 'key', plans: 'plan_version', sessions: 'id', races: 'id', logs: 'id' };
+// Minimal IndexedDB wrapper (no external library). v2 adds "activities".
+const NAME = 'fitplan', VER = 2;
+const STORES = { meta: 'key', plans: 'plan_version', sessions: 'id', races: 'id', logs: 'id', activities: 'id' };
 let dbp;
 function open() {
   if (dbp) return dbp;
@@ -26,6 +26,7 @@ export const setMeta = (key, value) => put('meta', { key, value });
 
 // Atomic multi-store write: ops = [{store, put?:obj, del?:key, clear?:true}]
 export async function batch(ops) {
+  if (!ops.length) return;
   const db = await open();
   const stores = [...new Set(ops.map(o => o.store))];
   const tx = db.transaction(stores, 'readwrite');

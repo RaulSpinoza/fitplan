@@ -1,7 +1,6 @@
 :root{--bg:#0f1626;--card:#1b2438;--line:#2b3650;--fg:#eef2f8;--mut:#93a0b8;--acc:#7cfc9a;--z1:#7aa7ff;--z2:#5fd38d;--z3:#f4d35e;--z4:#f59e5b;--z5:#ef5b5b}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 -apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
-/* Solid, own compositing layer: keeps the title crisp while content scrolls below it */
 header{position:sticky;top:0;z-index:5;background:#1f2a44;padding:calc(env(safe-area-inset-top) + 10px) 16px 10px;font-weight:700;font-size:17px;transform:translateZ(0);-webkit-backface-visibility:hidden;box-shadow:0 1px 0 var(--line)}
 .logo{color:var(--acc)}
 main{padding:12px 12px calc(env(safe-area-inset-bottom) + 84px);max-width:640px;margin:0 auto}
@@ -9,10 +8,10 @@ nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#141c2e;borde
 nav button{flex:1;background:none;border:0;color:var(--mut);font-size:20px;padding:8px 0 6px;display:flex;flex-direction:column;align-items:center}
 nav button span{font-size:11px;margin-top:2px}
 nav button.on{color:var(--acc)}
-h2{font-size:18px;margin:8px 4px}
+h2{font-size:18px;margin:14px 4px 6px}
 .card{background:var(--card);border-radius:14px;padding:12px 14px;margin:10px 0;border:1px solid var(--line)}
 .hero{background:linear-gradient(135deg,#24345c,#1b2438);text-align:center}
-.big{font-size:26px;font-weight:700}
+.big{font-size:26px;font-weight:700} .mid{font-size:18px;font-weight:600}
 .muted{color:var(--mut)} .small{font-size:13px} .center{text-align:center} .grow{flex:1;min-width:0} .pad{padding:0 0 6px}
 .title{font-weight:600;font-size:17px}
 .daynav{display:flex;align-items:center;gap:8px}
@@ -25,6 +24,10 @@ button.link{background:none;border:0;color:var(--acc);display:block;margin:4px a
 .sess.st-done{border-color:#3d7a52} .sess.st-skipped{opacity:.65}
 .blocks{margin:10px 0 0;padding-left:18px} .blocks li{margin:3px 0}
 .notes{margin-top:8px;padding:8px;border-radius:8px;background:#ffffff0d;font-size:14px}
+.actual{margin-top:8px;padding:8px;border-radius:8px;background:#7cfc9a12;border:1px solid #3d7a52}
+.ah{font-weight:600;font-size:14px;margin-bottom:2px}
+.al{font-size:13px;margin:3px 0}
+.extra{border-style:dashed}
 .lognote{margin-top:6px;font-size:14px;color:var(--z3)}
 .acts{display:flex;gap:6px;margin-top:10px}
 .acts button,.card button{flex:1;background:#ffffff10;border:1px solid var(--line);color:var(--fg);border-radius:10px;padding:10px 6px;font-size:14px}
@@ -36,6 +39,8 @@ button.primary{background:#2e6b43!important;border-color:var(--acc)!important;fo
 button.danger{background:#6b2424!important}
 .z{font-size:12px;padding:1px 6px;border-radius:6px;color:#111;font-weight:600;white-space:nowrap}
 .z1{background:var(--z1)}.z2{background:var(--z2)}.z3{background:var(--z3)}.z4{background:var(--z4)}.z5{background:var(--z5)}
+.zbar{display:flex;height:16px;border-radius:6px;overflow:hidden;margin:6px 0 2px}
+.zbar span{display:block;font-size:10px;line-height:16px;text-align:center;color:#111;font-weight:700}
 .empty{text-align:center;color:var(--mut);padding:24px}
 .race-today{background:#3b2a12;border-color:var(--z4)}
 .stats{display:flex;justify-content:space-around;text-align:center;margin:8px 0}
@@ -45,6 +50,10 @@ button.danger{background:#6b2424!important}
 .wi{font-size:14px;margin:1px 0}
 .rrow{display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);font-size:14px} .rrow span:first-child{width:86px}
 .rrow.now b{color:var(--acc)}
+.irow{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+.irow.bad{color:var(--z5)}
+.irow select{width:100%;margin-top:6px;background:#0b1120;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px;font-size:16px}
+.card button.x{flex:0 0 40px;padding:8px 0}
 .dleft{font-weight:700;color:var(--acc)} .past{opacity:.5}
 .prio{margin-left:auto;padding:1px 8px;border-radius:6px;font-weight:700;font-size:12px;background:#ffffff22}
 .pA{background:var(--z5);color:#111}.pB{background:var(--z3);color:#111}.pC{background:var(--z1);color:#111}

@@ -3,7 +3,6 @@ import { isISODate } from './util.js';
 
 export const SCHEMA = 'fitplan.plan/1.0';
 export const TYPES = ['run', 'bike', 'strength', 'ocr', 'mobility', 'rest', 'race', 'other'];
-export const STATUSES = ['pending', 'done', 'modified', 'skipped'];
 
 export function validatePlan(p) {
   const e = [];
@@ -33,8 +32,8 @@ export function validatePlan(p) {
   return e;
 }
 
-// A session is locked once the user logged a status other than pending.
-const locked = (logs, id) => { const l = logs[id]; return !!l && l.status && l.status !== 'pending'; };
+// Locked = user set a status manually (auto-proposed statuses from FIT import do not lock).
+const locked = (logs, id) => { const l = logs[id]; return !!l && l.status && l.status !== 'pending' && !l.auto; };
 const sig = s => JSON.stringify({ ...s, plan_version: undefined });
 
 /** current: stored sessions; logs: {id: log}; plan: validated plan. Returns diff + resulting sessions. */

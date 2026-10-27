@@ -10,5 +10,8 @@ export const daysBetween = (a, b) => Math.round((parse(b) - parse(a)) / 86400000
 export const fmt = s => { const d = parse(s); return `${pad(d.getDate())}-${MON[d.getMonth()]}-${d.getFullYear()}`; };
 export const fmtShort = s => { const d = parse(s); return `${WD[d.getDay()]} ${pad(d.getDate())}-${MON[d.getMonth()]}`; };
 export const mondayOf = s => { const d = parse(s); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return iso(d); };
+export const hhmm = isoTs => { const d = new Date(isoTs); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+export const fmtPace = minPerKm => minPerKm ? `${Math.floor(minPerKm)}:${pad(Math.round((minPerKm % 1) * 60) % 60)}` : '';
+export const r1 = x => Math.round(x * 10) / 10;
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const isISODate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && iso(parse(s)) === s;
