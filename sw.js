@@ -1,7 +1,8 @@
 // Bump VERSION on every release so the app shows the update banner.
-const VERSION = 'fitplan-1.2.0-M3';
+const VERSION = 'fitplan-1.3.0-M4';
 const FILES = ['./', 'index.html', 'styles.css', 'manifest.json', 'js/app.js', 'js/db.js', 'js/plan.js', 'js/util.js',
-  'js/fit.js', 'js/metrics.js', 'js/match.js', 'js/progress.js', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
+  'js/fit.js', 'js/metrics.js', 'js/match.js', 'js/progress.js', 'js/trends.js', 'js/charts.js',
+  'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); });
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {

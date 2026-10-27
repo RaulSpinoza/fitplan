@@ -4,16 +4,19 @@ import { decode, isFit } from './fit.js';
 import { summarize } from './metrics.js';
 import { autoAssign, proposeStatus, isDuplicate } from './match.js';
 import { buildProgress, toMarkdown, PAIN_LOCS, ASSESS_PROMPT } from './progress.js';
-import { today, addDays, daysBetween, fmt, fmtShort, mondayOf, hhmm, fmtPace, r1, esc } from './util.js';
+import { weeklySeries, loadSeries, easyPaceSeries, wellnessSeries, headline } from './trends.js';
+import { chart, legend } from './charts.js';
+import { today, addDays, daysBetween, fmt, fmtShort, fmtDM, mondayOf, hhmm, fmtPace, r1, esc } from './util.js';
 
-const APP_VERSION = '1.2.0-M3';
+const APP_VERSION = '1.3.0-M4';
 const DEFAULT_ATHLETE = { hr_max: 168, hr_rest: 46, zones: [117, 130, 142, 154] };
 const ICON = { run: '🏃', bike: '🚴', strength: '🏋️', ocr: '🧗', mobility: '🧘', rest: '😴', race: '🏁', walk: '🚶', hike: '🥾', swim: '🏊', other: '•' };
 const ST = { pending: '○', done: '✔', modified: '◐', skipped: '✕' };
+const ZC = ['#7aa7ff', '#5fd38d', '#f4d35e', '#f59e5b', '#ef5b5b'];
 
 const S = { tab: 'today', day: today(), weekStart: mondayOf(today()), sessions: [], logs: {}, races: [], plans: [], acts: [], checkins: {},
   athlete: DEFAULT_ATHLETE, pendingImport: null, fitStage: null, lastBackup: null, backupFile: null,
-  ciOpen: false, repWin: '14', report: null, lastExport: null };
+  ciOpen: false, repWin: '14', report: null, lastExport: null, trWeeks: 12 };
 const $ = sel => document.querySelector(sel);
 const view = () => $('#view');
 
@@ -27,6 +30,7 @@ async function load() {
   S.athlete = await db.getMeta('athlete', DEFAULT_ATHLETE);
   S.lastBackup = await db.getMeta('last_backup', null);
   S.lastExport = await db.getMeta('last_export', null);
+  S.trWeeks = await db.getMeta('trend_weeks', 12);
 }
 const currentPlan = () => S.plans[S.plans.length - 1];
 const statusOf = id => S.logs[id]?.status || 'pending';
@@ -42,8 +46,8 @@ const sumZones = acts => acts.reduce((z, a) => z.map((v, i) => v + (a.zone_min?.
 
 // ---------- rendering ----------
 function render() {
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-  ({ today: renderToday, week: renderWeek, races: renderRaces, report: renderReport, import: renderImport, settings: renderSettings })[S.tab]();
+  document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
+  ({ today: renderToday, week: renderWeek, trends: renderTrends, races: renderRaces, report: renderReport, import: renderImport, settings: renderSettings })[S.tab]();
   refreshBanner();
   window.scrollTo(0, 0);
 }
@@ -69,7 +73,7 @@ function countdown(d) {
   const nr = nextRaces(d); if (!nr.length) return '';
   const first = nr[0], same = nr.filter(r => r.date <= addDays(first.date, 1) && r.location === first.location);
   const n = daysBetween(d, first.date);
-  return `<div class="card hero"><div class="big">${n === 0 ? 'Race day!' : n + ' days'}</div>
+  return `<div class="card hero" data-tab="races"><div class="big">${n === 0 ? 'Race day!' : n + ' days'}</div>
     <div>to ${esc(first.location || first.name)} · ${same.map(r => esc(r.format ? cap(r.format) : r.name)).join(' + ')}</div>
     <div class="muted">${fmt(first.date)}</div></div>`;
 }
@@ -108,6 +112,7 @@ function sessionCard(s) {
 // ---------- daily check-in ----------
 const opt = (vals, sel, lbl = v => v) => vals.map(v => `<option value="${v}" ${String(v) === String(sel ?? '') ? 'selected' : ''}>${lbl(v)}</option>`).join('');
 const range = (a, b) => [...Array(b - a + 1)].map((_, i) => a + i);
+
 function painRow(p = { loc: 'r_foot', score: 1 }) {
   return `<div class="prow"><select class="ploc">${opt(Object.keys(PAIN_LOCS), p.loc, k => PAIN_LOCS[k])}</select>
     <select class="pscore">${opt(range(0, 10), p.score, v => v + '/10')}</select><button class="x" data-act="pdel">✕</button></div>`;
@@ -191,6 +196,93 @@ function renderWeek() {
     <div class="muted small">Compliance = planned minutes of sessions marked done/modified ÷ planned minutes. 🩺 = check-in (number = max pain).</div>`;
 }
 
+// ---------- Trends tab (M4) ----------
+function trendData() {
+  const to = today(), n = S.trWeeks, from = addDays(mondayOf(to), -7 * (n - 1));
+  const ci = Object.values(S.checkins);
+  const weeks = weeklySeries({ acts: S.acts, sessions: S.sessions, logs: S.logs, checkins: ci, to, nWeeks: n });
+  const load = loadSeries({ acts: S.acts, from, to });
+  const pace = easyPaceSeries({ acts: S.acts, from, to });
+  const well = wellnessSeries({ checkins: ci, from, to });
+  // pace over full history for the headline comparison (needs > window)
+  const paceAll = easyPaceSeries({ acts: S.acts, from: addDays(from, -56), to });
+  return { from, to, weeks, load, pace, well, head: headline(weeksForHeadline(to), paceAll) };
+}
+const weeksForHeadline = to => weeklySeries({ acts: S.acts, sessions: S.sessions, logs: S.logs, checkins: Object.values(S.checkins), to, nWeeks: 9 });
+
+const delta = (a, b, unit = '', dec = 1, lowerBetter = false) => {
+  if (a == null || b == null || !b) return '';
+  const d = a - b, good = lowerBetter ? d < 0 : d > 0, pct = Math.round(100 * d / b);
+  return `<span class="${Math.abs(pct) < 3 ? 'muted' : good ? 'okt' : 'warn'} small">${d > 0 ? '▲' : '▼'} ${Math.abs(pct)}%</span>`;
+};
+
+// Daily trend line for the pace chart: hold the last value between runs (from first to last run).
+function paceTrendDaily(days, pace) {
+  let cur = null; const last = pace.length ? pace[pace.length - 1].date : null;
+  return days.map(x => { const p = pace.filter(q => q.date === x.date).pop(); if (p) cur = p.trend; return last && x.date <= last ? cur : null; });
+}
+
+function renderTrends() {
+  if (!S.acts.length && !Object.keys(S.checkins).length) {
+    view().innerHTML = `<h2>Trends</h2><div class="card empty">No data yet. Import workouts (FIT) and log check-ins to see trends.</div>`; return;
+  }
+  const { weeks, load, pace, well, head } = trendData();
+  const wl = weeks.map(w => fmtDM(w.ws)), cur = weeks.findIndex(w => w.current);
+  const dl = load.map(x => fmtDM(x.date));
+  const lastL = load[load.length - 1], acwr = lastL?.acwr;
+  const acwrTxt = acwr == null ? 'n/a' : acwr;
+  const acwrCls = acwr == null ? 'muted' : acwr > 1.5 ? 'warn' : acwr > 1.3 || acwr < 0.8 ? 'mild' : 'okt';
+  const paceIdx = new Map(load.map((x, i) => [x.date, i]));
+
+  view().innerHTML = `<div class="sh"><h2 class="grow">Trends</h2>
+      <div class="seg">${[4, 12, 26].map(n => `<button data-act="trw" data-n="${n}" class="${S.trWeeks === n ? 'on' : ''}">${n} w</button>`).join('')}</div></div>
+
+    <div class="card"><b>Last 4 weeks vs. 4 before</b>
+      <div class="kpis">
+        <div><div class="mid">${head.hours != null ? r1(head.hours) + ' h' : '–'}</div><div class="muted small">per week ${delta(head.hours, head.hours_prev)}</div></div>
+        <div><div class="mid">${head.run_km != null ? r1(head.run_km) + ' km' : '–'}</div><div class="muted small">run/week ${delta(head.run_km, head.run_km_prev)}</div></div>
+        <div><div class="mid">${head.easy_pace ? fmtPace(head.easy_pace) : '–'}</div><div class="muted small">easy pace ${delta(head.easy_pace, head.easy_pace_prev, '', 2, true)}</div></div>
+        <div><div class="mid">${head.compliance != null ? Math.round(head.compliance) + '%' : '–'}</div><div class="muted small">compliance</div></div>
+        <div><div class="mid">${head.low_pct != null ? head.low_pct + '%' : '–'}</div><div class="muted small">time Z1–Z2</div></div>
+        <div><div class="mid ${acwrCls}">${acwrTxt}</div><div class="muted small">ACWR now</div></div>
+      </div></div>
+
+    <div class="card"><b>Weekly volume (hours by zone)</b>
+      ${chart({ labels: wl, highlight: cur, bars: [0, 1, 2, 3, 4].map(i => ({ values: weeks.map(w => w.zone_h[i]), color: ZC[i] })), barLine: { values: weeks.map(w => w.planned_h), color: '#eef2f8' } })}
+      ${legend([[ZC[0], 'Z1'], [ZC[1], 'Z2'], [ZC[2], 'Z3'], [ZC[3], 'Z4'], [ZC[4], 'Z5'], ['#eef2f8', 'planned', true]])}</div>
+
+    <div class="card"><b>Run km & climb</b>
+      ${chart({ labels: wl, highlight: cur, bars: [{ values: weeks.map(w => w.run_km), color: '#7cfc9a' }] })}
+      ${chart({ labels: wl, highlight: cur, bars: [{ values: weeks.map(w => w.ascent_m), color: '#c39bff' }], yFmt: v => Math.round(v) })}
+      ${legend([['#7cfc9a', 'run km / week'], ['#c39bff', 'D+ m / week']])}</div>
+
+    <div class="card"><b>Training load (TRIMP)</b>
+      ${chart({ labels: dl, bars: [{ values: load.map(x => x.trimp), color: '#3d4f78' }], lines: [{ values: load.map(x => x.acute), color: '#f59e5b' }, { values: load.map(x => x.chronic), color: '#7aa7ff' }], yFmt: v => Math.round(v) })}
+      ${legend([['#3d4f78', 'daily'], ['#f59e5b', '7-day (acute)'], ['#7aa7ff', '28-day weekly avg (chronic)']])}
+      ${chart({ labels: dl, yMin: 0, yMax: 2, ticks: 4, band: [0.8, 1.3, '#7cfc9a'], refLine: { y: 1.5, color: '#ef5b5b' }, lines: [{ values: load.map(x => x.acwr), color: '#eef2f8' }], yFmt: v => v.toFixed(1) })}
+      <div class="muted small">ACWR = acute ÷ chronic. Green band 0.8–1.3 = sustainable; above 1.5 (red line) = load spike, higher injury risk. Needs 28 days of history.</div></div>
+
+    <div class="card"><b>Aerobic marker – easy pace at Z2 HR</b>
+      ${pace.length ? chart({ labels: dl, invert: true, dots: pace.map(p => ({ i: paceIdx.get(p.date), y: p.pace, color: '#5fd38d' })),
+        lines: [{ values: paceTrendDaily(load, pace), color: '#eef2f8', width: 1.5 }], yFmt: v => fmtPace(v) })
+        + legend([['#5fd38d', 'run'], ['#eef2f8', 'median of last 4']])
+        : '<div class="muted small">No qualifying runs yet (flat, ≥ 5 min at 120–130 bpm).</div>'}
+      <div class="muted small">Faster pace at the same HR = better aerobic fitness. Higher on the chart = faster.</div></div>
+
+    <div class="card"><b>Recovery – pain, resting HR, sleep</b>
+      ${well.some(x => x.pain != null || x.rhr != null || x.sleep_h != null) ? `
+      ${chart({ labels: dl, yMin: 0, yMax: 10, ticks: 5, bars: [{ values: well.map(x => x.pain), color: '#ef5b5b' }], yFmt: v => Math.round(v) })}
+      ${legend([['#ef5b5b', 'max pain /10']])}
+      ${well.some(x => x.rhr) ? chart({ labels: dl, lines: [{ values: well.map(x => x.rhr), color: '#f4d35e', dots: true }], refLine: { y: S.athlete.hr_rest, color: '#93a0b8' }, yMin: Math.min(...well.filter(x => x.rhr).map(x => x.rhr), S.athlete.hr_rest) - 3, yMax: Math.max(...well.filter(x => x.rhr).map(x => x.rhr), S.athlete.hr_rest) + 3, yFmt: v => Math.round(v) })
+        + legend([['#f4d35e', 'resting HR'], ['#93a0b8', `baseline ${S.athlete.hr_rest}`, true]]) : ''}
+      ${well.some(x => x.sleep_h) ? chart({ labels: dl, bars: [{ values: well.map(x => x.sleep_h), color: '#7aa7ff' }], refLine: { y: 7, color: '#93a0b8' }, yMin: 0 }) + legend([['#7aa7ff', 'sleep h'], ['#93a0b8', '7 h', true]]) : ''}`
+      : '<div class="muted small">No check-ins in this period.</div>'}</div>
+
+    <div class="card"><b>Weekly table</b><div class="tbl"><table><tr><th>Week</th><th>h</th><th>km</th><th>D+</th><th>TRIMP</th><th>Compl.</th><th>Pain</th></tr>
+      ${weeks.slice().reverse().map(w => `<tr class="${w.current ? 'now' : ''}"><td>${fmtDM(w.ws)}</td><td>${r1(w.hours)}</td><td>${r1(w.run_km)}</td><td>${w.ascent_m}</td><td>${w.trimp}</td><td>${w.compliance ?? '–'}${w.compliance != null ? '%' : ''}</td><td>${w.max_pain ?? '–'}</td></tr>`).join('')}
+      </table></div></div>`;
+}
+
 function renderRaces() {
   const t = today(), groups = [];
   for (const r of S.races) {
@@ -219,7 +311,7 @@ function prepareReport() {
   const p = buildProgress({ from, to, todayStr: today(), sessions: S.sessions, logs: S.logs, acts: S.acts, checkins: Object.values(S.checkins),
     races: S.races, plan: currentPlan(), athlete: S.athlete, appVersion: APP_VERSION });
   const md = toMarkdown(p), tag = `${from}_${to}`;
-  S.report = { p, md, json: JSON.stringify(p, null, 1),
+  S.report = { p, md,
     mdFile: new File([md], `progress_${tag}.md`, { type: 'text/plain' }),
     jsonFile: new File([JSON.stringify(p, null, 1)], `progress_${tag}.json`, { type: 'application/json' }) };
 }
@@ -489,6 +581,7 @@ document.addEventListener('click', async e => {
   if (act === 'day') { const n = +el.dataset.n; S.day = n === 0 ? today() : addDays(S.day, n); S.ciOpen = false; render(); }
   else if (act === 'week') { const n = +el.dataset.n; S.weekStart = n === 0 ? mondayOf(today()) : addDays(S.weekStart, n); render(); }
   else if (act === 'goto') { S.day = el.dataset.d; S.tab = 'today'; S.ciOpen = false; render(); }
+  else if (act === 'trw') { S.trWeeks = +el.dataset.n; await db.setMeta('trend_weeks', S.trWeeks); render(); }
   else if (act === 'status') setStatus(el.dataset.id, el.dataset.st);
   else if (act === 'note') setNote(el.dataset.id);
   else if (act === 'ciopen') { S.ciOpen = true; render(); setTimeout(() => $('.ci')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50); }
@@ -535,12 +628,12 @@ document.addEventListener('change', async e => {
   }
 });
 
-// Swipe left/right on Today & Week (not while editing the check-in)
+// Swipe left/right on Today & Week (not while editing the check-in or on charts)
 let tx0 = null;
 document.addEventListener('touchstart', e => { tx0 = e.touches[0].clientX; }, { passive: true });
 document.addEventListener('touchend', e => {
   if (tx0 === null) return; const dx = e.changedTouches[0].clientX - tx0; tx0 = null;
-  if (Math.abs(dx) < 70 || S.ciOpen || e.target.closest('textarea,input,select,.zbar,pre')) return;
+  if (Math.abs(dx) < 70 || S.ciOpen || e.target.closest('textarea,input,select,.zbar,pre,svg,.tbl')) return;
   if (S.tab === 'today') { S.day = addDays(S.day, dx < 0 ? 1 : -1); render(); }
   else if (S.tab === 'week') { S.weekStart = addDays(S.weekStart, dx < 0 ? 7 : -7); render(); }
 });

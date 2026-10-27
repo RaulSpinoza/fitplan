@@ -9,6 +9,7 @@ export const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n
 export const daysBetween = (a, b) => Math.round((parse(b) - parse(a)) / 86400000);
 export const fmt = s => { const d = parse(s); return `${pad(d.getDate())}-${MON[d.getMonth()]}-${d.getFullYear()}`; };
 export const fmtShort = s => { const d = parse(s); return `${WD[d.getDay()]} ${pad(d.getDate())}-${MON[d.getMonth()]}`; };
+export const fmtDM = s => { const d = parse(s); return `${pad(d.getDate())}-${MON[d.getMonth()]}`; };
 export const mondayOf = s => { const d = parse(s); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return iso(d); };
 export const isoWeek = s => { const t = parse(s); t.setDate(t.getDate() + 3 - (t.getDay() + 6) % 7); const w1 = new Date(t.getFullYear(), 0, 4, 12);
   return `${t.getFullYear()}-W${pad(1 + Math.round(((t - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7))}`; };
