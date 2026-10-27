@@ -2,12 +2,12 @@ import * as db from './db.js';
 import { validatePlan, mergePlan, SCHEMA } from './plan.js';
 import { today, addDays, daysBetween, fmt, fmtShort, mondayOf, esc } from './util.js';
 
-const APP_VERSION = '1.0.0-M1';
+const APP_VERSION = '1.0.1-M1';
 const DEFAULT_ATHLETE = { hr_max: 168, hr_rest: 46, zones: [117, 130, 142, 154] };
 const ICON = { run: '🏃', bike: '🚴', strength: '🏋️', ocr: '🧗', mobility: '🧘', rest: '😴', race: '🏁', other: '•' };
 const ST = { pending: '○', done: '✔', modified: '◐', skipped: '✕' };
 
-const S = { tab: 'today', day: today(), weekStart: mondayOf(today()), sessions: [], logs: {}, races: [], plans: [], athlete: DEFAULT_ATHLETE, pendingImport: null };
+const S = { tab: 'today', day: today(), weekStart: mondayOf(today()), sessions: [], logs: {}, races: [], plans: [], athlete: DEFAULT_ATHLETE, pendingImport: null, lastBackup: null, backupFile: null };
 const $ = sel => document.querySelector(sel);
 const view = () => $('#view');
 
@@ -17,10 +17,12 @@ async function load() {
   S.races = (await db.all('races')).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   S.plans = (await db.all('plans')).sort((a, b) => a.plan_version - b.plan_version);
   S.athlete = await db.getMeta('athlete', DEFAULT_ATHLETE);
+  S.lastBackup = await db.getMeta('last_backup', null);
 }
 const currentPlan = () => S.plans[S.plans.length - 1];
 const statusOf = id => S.logs[id]?.status || 'pending';
 const sessionsOn = d => S.sessions.filter(s => s.date === d);
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 const zoneLabel = z => { const Z = S.athlete.zones; const lo = [0, Z[0] + 1, Z[1] + 1, Z[2] + 1, Z[3] + 1][z - 1], hi = [Z[0], Z[1], Z[2], Z[3], null][z - 1];
   return `Z${z} ${hi ? (z === 1 ? '≤' + hi : lo + '–' + hi) : '≥' + lo}`; };
 const phaseOn = d => (currentPlan()?.phases || []).find(p => p.from <= d && d <= p.to);
@@ -30,7 +32,16 @@ const nextRaces = d => S.races.filter(r => r.date >= d);
 function render() {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
   ({ today: renderToday, week: renderWeek, races: renderRaces, import: renderImport, settings: renderSettings })[S.tab]();
+  refreshBanner();
   window.scrollTo(0, 0);
+}
+
+// Backup banner: shown when data exists and last backup is missing or ≥ 7 days old. Re-evaluated on every render.
+function refreshBanner() {
+  const due = S.sessions.length && (!S.lastBackup || daysBetween(S.lastBackup, today()) >= 7);
+  const b = $('#banner');
+  if (b.dataset.update) return;               // update banner has priority
+  b.innerHTML = due && S.tab !== 'settings' ? `<button data-tab="settings">💾 Last backup: ${S.lastBackup ? fmt(S.lastBackup) : 'never'} – tap to back up</button>` : '';
 }
 
 function countdown(d) {
@@ -39,7 +50,7 @@ function countdown(d) {
   const first = nr[0], same = nr.filter(r => r.date <= addDays(first.date, 1) && r.location === first.location);
   const n = daysBetween(d, first.date);
   return `<div class="card hero"><div class="big">${n === 0 ? 'Race day!' : n + ' days'}</div>
-    <div>to ${esc(first.location || first.name)} · ${same.map(r => esc(r.format ? r.format[0].toUpperCase() + r.format.slice(1) : r.name)).join(' + ')}</div>
+    <div>to ${esc(first.location || first.name)} · ${same.map(r => esc(r.format ? cap(r.format) : r.name)).join(' + ')}</div>
     <div class="muted">${fmt(first.date)}</div></div>`;
 }
 
@@ -59,17 +70,16 @@ function blockLine(b) {
   return `<li>${parts.join(' ')}</li>`;
 }
 
-function sessionCard(s, full = true) {
-  const st = statusOf(s.id), log = S.logs[s.id];
-  const t = s.target || {};
+function sessionCard(s) {
+  const st = statusOf(s.id), log = S.logs[s.id], t = s.target || {};
   const meta = [s.duration_min && `${s.duration_min} min`, s.distance_km && `${s.distance_km} km`, t.hr_zone && `<span class="z z${t.hr_zone}">${zoneLabel(t.hr_zone)}</span>`, t.pace_min_km && `${esc(t.pace_min_km)}/km`, t.rpe && `RPE ${t.rpe}`].filter(Boolean).join(' · ');
   return `<div class="card sess st-${st}">
     <div class="sh"><span class="ico">${ICON[s.type] || '•'}</span><div class="grow"><div class="title">${esc(s.title)}</div><div class="muted">${meta}</div></div><span class="stb">${ST[st]}</span></div>
-    ${full && s.blocks?.length ? `<ul class="blocks">${s.blocks.map(blockLine).join('')}</ul>` : ''}
-    ${full && s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ''}
-    ${full && log?.note ? `<div class="lognote">📝 ${esc(log.note)}</div>` : ''}
-    ${full ? `<div class="acts">${['done', 'modified', 'skipped'].map(x => `<button data-act="status" data-id="${esc(s.id)}" data-st="${x}" class="${st === x ? 'sel ' + x : ''}">${ST[x]} ${x}</button>`).join('')}
-      <button data-act="note" data-id="${esc(s.id)}">📝</button></div>` : ''}
+    ${s.blocks?.length ? `<ul class="blocks">${s.blocks.map(blockLine).join('')}</ul>` : ''}
+    ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ''}
+    ${log?.note ? `<div class="lognote">📝 ${esc(log.note)}</div>` : ''}
+    <div class="acts">${['done', 'modified', 'skipped'].map(x => `<button data-act="status" data-id="${esc(s.id)}" data-st="${x}" class="${st === x ? 'sel ' + x : ''}">${ST[x]} ${x}</button>`).join('')}
+      <button data-act="note" data-id="${esc(s.id)}">📝</button></div>
   </div>`;
 }
 
@@ -83,7 +93,7 @@ function renderToday() {
     ${d !== today() ? `<button class="link" data-act="day" data-n="0">Back to today</button>` : ''}
     ${countdown(d)}
     ${raceToday.map(r => `<div class="card race-today">🏁 <b>${esc(r.name)}</b></div>`).join('')}
-    ${list.length ? list.map(s => sessionCard(s)).join('') : `<div class="card empty">${S.sessions.length ? 'No session planned. Rest day.' : 'No plan loaded yet. Go to <b>Import</b> to load a plan from Copilot.'}</div>`}
+    ${list.length ? list.map(sessionCard).join('') : `<div class="card empty">${S.sessions.length ? 'No session planned. Rest day.' : 'No plan loaded yet. Go to <b>Import</b> to load a plan from Copilot.'}</div>`}
     ${ph?.focus ? `<div class="muted small">Phase focus: ${esc(ph.focus)}</div>` : ''}`;
 }
 
@@ -121,7 +131,7 @@ function renderRaces() {
     ${groups.map(g => { const n = daysBetween(t, g.start), past = n < 0;
       return `<div class="card ${past ? 'past' : ''}"><div class="sh"><div class="grow"><div class="title">${esc(g.location)} ${g.country ? `<span class="muted">${esc(g.country)}</span>` : ''}</div>
         <div class="muted">${fmt(g.start)}${g.end !== g.start ? ' – ' + fmt(g.end) : ''}</div></div><div class="dleft">${past ? 'done' : n + ' d'}</div></div>
-        ${g.races.map(r => `<div class="rrow"><span>${fmtShort(r.date)}</span><b>${esc(r.format ? r.format[0].toUpperCase() + r.format.slice(1) : r.name)}</b>
+        ${g.races.map(r => `<div class="rrow"><span>${fmtShort(r.date)}</span><b>${esc(r.format ? cap(r.format) : r.name)}</b>
           <span class="muted">${[r.distance_km && r.distance_km + ' km', r.elevation_m && r.elevation_m + ' m D+'].filter(Boolean).join(' · ')}</span>
           ${r.priority ? `<span class="prio p${esc(r.priority)}">${esc(r.priority)}</span>` : ''}</div>`).join('')}</div>`; }).join('') || '<div class="card empty">No races yet. They come with the plan import.</div>'}
     ${phases.length ? `<h2>Phases</h2><div class="card">${phases.map(p => `<div class="rrow ${p.from <= t && t <= p.to ? 'now' : ''}"><b>${esc(p.name)}</b><span class="muted">${fmt(p.from)} – ${fmt(p.to)}</span></div><div class="muted small pad">${esc(p.focus || '')}</div>`).join('')}</div>` : ''}`;
@@ -161,6 +171,11 @@ function importPreview(pi) {
 function renderSettings() {
   const a = S.athlete, z = a.zones;
   view().innerHTML = `<h2>Settings</h2>
+    <div class="card"><b>Backup</b>
+      <div class="${S.lastBackup && daysBetween(S.lastBackup, today()) < 7 ? 'okt' : 'warn'}">Last backup: ${S.lastBackup ? fmt(S.lastBackup) : 'never'}</div>
+      <div class="muted small">Save to iCloud Drive → FitPlan. iOS may delete web-app data after long non-use.</div>
+      <button data-act="backup" id="backupbtn" disabled>💾 Preparing backup…</button>
+      <button data-act="pickrestore">♻️ Restore backup</button><input type="file" id="restorefile" accept=".json,application/json" hidden></div>
     <div class="card"><b>Athlete</b>
       <label>Max HR <input id="hrmax" type="number" inputmode="numeric" value="${a.hr_max}"></label>
       <label>Resting HR <input id="hrrest" type="number" inputmode="numeric" value="${a.hr_rest}"></label>
@@ -168,11 +183,32 @@ function renderSettings() {
       ${[0, 1, 2, 3].map(i => `<label>Z${i + 1} ≤ <input class="zin" type="number" inputmode="numeric" value="${z[i]}"></label>`).join('')}
       <div class="muted small">Z5 ≥ ${z[3] + 1}</div>
       <button data-act="saveathlete">Save</button></div>
-    <div class="card"><b>Backup</b><div class="muted small">Save to iCloud Drive → FitPlan. iOS may delete web-app data after long non-use.</div>
-      <button data-act="backup">💾 Export backup</button>
-      <button data-act="pickrestore">♻️ Restore backup</button><input type="file" id="restorefile" accept=".json,application/json" hidden></div>
     <div class="card"><b>Danger zone</b><button class="danger" data-act="wipe">Delete all data</button></div>
-    <div class="muted small center">FitPlan ${APP_VERSION} · ${navigator.standalone ? 'Home Screen app' : 'browser'} · data stays on this device</div>`;
+    <div class="muted small center">FitPlan ${APP_VERSION} · ${navigator.standalone ? 'Home Screen app' : 'Safari browser'} · data stays on this device</div>`;
+  prepareBackup();
+}
+
+// Build the backup file BEFORE the tap. iOS only allows the share sheet directly inside a tap;
+// awaiting the database first made iOS block it, so the backup was never confirmed.
+async function prepareBackup() {
+  const data = { schema: 'fitplan.backup/1.0', app_version: APP_VERSION, created_at: new Date().toISOString(), data: await db.dump() };
+  S.backupFile = new File([JSON.stringify(data)], `fitplan-backup-${today()}.json`, { type: 'application/json' });
+  const btn = $('#backupbtn');
+  if (btn) { btn.disabled = false; btn.textContent = '💾 Export backup'; }
+}
+
+function doBackup() {
+  const file = S.backupFile; if (!file) return;
+  const mark = async () => { S.lastBackup = today(); await db.setMeta('last_backup', S.lastBackup); toast('Backup saved'); render(); };
+  if (navigator.canShare?.({ files: [file] })) {
+    navigator.share({ files: [file], title: file.name })        // called synchronously within the tap
+      .then(mark)
+      .catch(e => { if (e.name !== 'AbortError') { download(file); mark(); } else toast('Backup cancelled'); });
+  } else { download(file); mark(); }
+}
+function download(file) {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
 // ---------- actions ----------
@@ -218,15 +254,7 @@ async function setNote(id) {
   await db.put('logs', next); S.logs[id] = next; render();
 }
 
-async function shareFile(name, text) {
-  const file = new File([text], name, { type: 'application/json' });
-  if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; } }
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: name });
-  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-}
-
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200); }
-const readFile = f => f.text();
 
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act],[data-tab]'); if (!el) return;
@@ -241,26 +269,22 @@ document.addEventListener('click', async e => {
   else if (act === 'pasteplan') stagePlan($('#planpaste').value);
   else if (act === 'applyplan') applyPlan();
   else if (act === 'cancelplan') { S.pendingImport = null; render(); }
+  else if (act === 'backup') doBackup();
+  else if (act === 'pickrestore') $('#restorefile').click();
   else if (act === 'saveathlete') {
     const zones = [...document.querySelectorAll('.zin')].map(i => +i.value);
     if (!zones.every((z, i) => z > 0 && (i === 0 || z > zones[i - 1]))) return toast('Zones must be ascending');
     S.athlete = { hr_max: +$('#hrmax').value, hr_rest: +$('#hrrest').value, zones };
     await db.setMeta('athlete', S.athlete); toast('Saved');
   }
-  else if (act === 'backup') {
-    const data = { schema: 'fitplan.backup/1.0', app_version: APP_VERSION, created_at: new Date().toISOString(), data: await db.dump() };
-    await shareFile(`fitplan-backup-${today()}.json`, JSON.stringify(data));
-    await db.setMeta('last_backup', today());
-  }
-  else if (act === 'pickrestore') $('#restorefile').click();
   else if (act === 'wipe') { if (confirm('Delete ALL FitPlan data on this device? Export a backup first.')) { await db.wipe(); await load(); toast('All data deleted'); render(); } }
 });
 
 document.addEventListener('change', async e => {
-  if (e.target.id === 'planfile' && e.target.files[0]) stagePlan(await readFile(e.target.files[0]));
+  if (e.target.id === 'planfile' && e.target.files[0]) stagePlan(await e.target.files[0].text());
   if (e.target.id === 'restorefile' && e.target.files[0]) {
     try {
-      const b = JSON.parse(await readFile(e.target.files[0]));
+      const b = JSON.parse(await e.target.files[0].text());
       if (b.schema !== 'fitplan.backup/1.0') throw new Error('Not a FitPlan backup');
       if (!confirm(`Restore backup from ${fmt(b.created_at.slice(0, 10))}? Current data will be replaced.`)) return;
       await db.restore(b.data); await load(); toast('Backup restored'); S.tab = 'today'; render();
@@ -278,23 +302,19 @@ document.addEventListener('touchend', e => {
   else if (S.tab === 'week') { S.weekStart = addDays(S.weekStart, dx < 0 ? 7 : -7); render(); }
 });
 
-// Re-render when returning to the app on a new day
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.tab === 'today' && S.lastRender !== today()) { S.day = today(); render(); } S.lastRender = today(); });
-
-async function backupReminder() {
-  const last = await db.getMeta('last_backup', null);
-  if (S.sessions.length && (!last || daysBetween(last, today()) >= 7)) $('#banner').innerHTML = `<button data-tab="settings">💾 Last backup: ${last ? fmt(last) : 'never'} – tap to back up</button>`;
-}
+// Jump to the new day when the app is reopened after midnight
+let lastDay = today();
+document.addEventListener('visibilitychange', () => { if (!document.hidden && lastDay !== today()) { lastDay = today(); S.day = today(); S.weekStart = mondayOf(today()); render(); } });
 
 (async () => {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').then(reg => {
       reg.addEventListener('updatefound', () => {
         const nw = reg.installing;
-        nw?.addEventListener('statechange', () => { if (nw.state === 'installed' && navigator.serviceWorker.controller) $('#banner').innerHTML = `<button onclick="location.reload()">🔄 New version available – tap to update</button>`; });
+        nw?.addEventListener('statechange', () => { if (nw.state === 'installed' && navigator.serviceWorker.controller) { const b = $('#banner'); b.dataset.update = '1'; b.innerHTML = `<button onclick="location.reload()">🔄 New version available – tap to update</button>`; } });
       });
     });
   }
   navigator.storage?.persist?.();
-  await load(); S.lastRender = today(); render(); backupReminder();
+  await load(); render();
 })();

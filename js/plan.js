@@ -37,25 +37,22 @@ export function validatePlan(p) {
 const locked = (logs, id) => { const l = logs[id]; return !!l && l.status && l.status !== 'pending'; };
 const sig = s => JSON.stringify({ ...s, plan_version: undefined });
 
-/**
- * current: array of stored sessions; logs: {id: log}; plan: validated plan.
- * Returns diff + resulting session list.
- */
+/** current: stored sessions; logs: {id: log}; plan: validated plan. Returns diff + resulting sessions. */
 export function mergePlan(current, logs, plan) {
   const vf = plan.valid_from;
   const incoming = new Map(plan.sessions.map(s => [s.id, { ...s, slot: s.slot ?? 1, plan_version: plan.plan_version }]));
   const result = [], added = [], changed = [], removed = [], kept = [];
   const seen = new Set();
   for (const s of current) {
-    if (s.date < vf || locked(logs, s.id)) {          // past or logged → keep as is
+    if (s.date < vf || locked(logs, s.id)) {
       result.push(s); seen.add(s.id);
       if (incoming.has(s.id) && s.date >= vf) kept.push(s);
       continue;
     }
-    if (incoming.has(s.id)) {                           // replaced
+    if (incoming.has(s.id)) {
       const n = incoming.get(s.id); result.push(n); seen.add(s.id);
       if (sig(n) !== sig(s)) changed.push(n);
-    } else removed.push(s);                             // dropped by new plan
+    } else removed.push(s);
   }
   for (const [id, n] of incoming) if (!seen.has(id)) { result.push(n); added.push(n); }
   result.sort((a, b) => a.date.localeCompare(b.date) || a.slot - b.slot);
