@@ -1,0 +1,101 @@
+{
+  "app": "FitPlan",
+  "version": "1.3.0-M4",
+  "source_commit": "ceab86bb07e228fd5d0370bead98605c5790cce2",
+  "generated_at": "2026-11-08T18:38:44Z",
+  "bundle_sha256": "b861945da2621246b41cd5ef2b9af57a0c01a0e6797eebfca0347affc968d61b",
+  "files": {
+    ".github/workflows/source-bundle.yml": {
+      "sha256": "1a59a6f79459a7f259f0353e9d7c73655efefdc477cedcf0cbe3d216001e8311",
+      "bytes": 996
+    },
+    ".gitignore": {
+      "sha256": "0857715136ed771e134c8fb8ca3358d32cb9ca17469338c6fa196d7c09f222e2",
+      "bytes": 129
+    },
+    "README.md": {
+      "sha256": "2965e4bc1d6dc997717f24f213b2003ed8b568e226d4fac13844932c851f28e5",
+      "bytes": 1338
+    },
+    "docs/SOURCE-PRESERVATION.md": {
+      "sha256": "c8d83b896f492ba4f842a7f86c7e95c585a4e0f4a995d649b891c30ea3ce3f6c",
+      "bytes": 1180
+    },
+    "icons/icon-180.png": {
+      "sha256": "069c7ceaa0e78b4094b9546fbc0b7452a0eee0dce7534751f72127acc315c073",
+      "bytes": 994
+    },
+    "icons/icon-192.png": {
+      "sha256": "cc87af1310d39efccdcad2afca46496f18cad528af042d6e399a8379753d3509",
+      "bytes": 1061
+    },
+    "icons/icon-512.png": {
+      "sha256": "2c6febce47e305a3cdc52ce8b5a3c6190accd121bb902a3cbc9089798ff7100b",
+      "bytes": 2891
+    },
+    "index.html": {
+      "sha256": "983d675d4940604644ef86caeb5160d2e0ca99c5b2f11a0be4ccf7d8d26121c5",
+      "bytes": 1301
+    },
+    "js/app.js": {
+      "sha256": "f6a6769eca9e5c529267cbdd71a56f42fe1fe85525f3d6abdda251d372d73f23",
+      "bytes": 46748
+    },
+    "js/charts.js": {
+      "sha256": "60c6a8b1ee61019a4ef1b304f87239b6489b7b8ecfa0d1960c65f8ba3ac59af3",
+      "bytes": 4534
+    },
+    "js/db.js": {
+      "sha256": "140f7ffe0ecb2c1a8332a32cc523a9547a4938b0efe412c8ba0e727c22210779",
+      "bytes": 2408
+    },
+    "js/fit.js": {
+      "sha256": "7c4c4d34b526c362bd854e91e66a35c2b464f7e3b9ec9bd5011883e71504d1b0",
+      "bytes": 3242
+    },
+    "js/match.js": {
+      "sha256": "7d5487c3f11826d7466cc43ef6aa244557bab86d4df889daa4cf8b31a7c8f5c4",
+      "bytes": 3272
+    },
+    "js/metrics.js": {
+      "sha256": "f2401df014d774a6c8e799f31aca56a338bf91d5ca3495d361fb809821b9e57e",
+      "bytes": 4368
+    },
+    "js/plan.js": {
+      "sha256": "5c4e980dcb456520ce64297d6cd3dd0bfb5f6a23481de76a691e51e35f322934",
+      "bytes": 3170
+    },
+    "js/progress.js": {
+      "sha256": "103c057f89ec4990ee654a481300d6f91085aa59f0e362977742840041a10aaa",
+      "bytes": 10637
+    },
+    "js/trends.js": {
+      "sha256": "b6944d8d31586b244f325a9fbf3ac8db80d7b4b0068ec49466c63a718e134e7c",
+      "bytes": 4432
+    },
+    "js/util.js": {
+      "sha256": "1cea0a2b80600c0b45187bcfbb1af7edbb3be3f9065b6dbb7e65c427b35ee74b",
+      "bytes": 2027
+    },
+    "manifest.json": {
+      "sha256": "44e2495ac54ac18e12e5fd3376d74d6e7795d520061927542e860a0e4c88eec7",
+      "bytes": 350
+    },
+    "robots.txt": {
+      "sha256": "331ea9090db0c9f6f597bd9840fd5b171830f6e0b3ba1cb24dfa91f0c95aedc1",
+      "bytes": 26
+    },
+    "styles.css": {
+      "sha256": "58e0891a59d24a9116186ddafdc35ffdd9cf46b46a266c92bfc3b97bffb43ab4",
+      "bytes": 8041
+    },
+    "sw.js": {
+      "sha256": "909bcbcfcee350e55fcc9751919e39d6f7aab4fdc312fe542ac43495ab3071d9",
+      "bytes": 882
+    },
+    "tools/bundle.py": {
+      "sha256": "f459c394c1eaabeeea31d95fe0506dc43932b0afc432e28708d6ef0bf89ca8a4",
+      "bytes": 6680
+    }
+  }
+}
