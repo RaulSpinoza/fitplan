@@ -8,7 +8,7 @@ import { weeklySeries, loadSeries, easyPaceSeries, wellnessSeries, headline } fr
 import { chart, legend } from './charts.js';
 import { today, addDays, daysBetween, fmt, fmtShort, fmtDM, mondayOf, hhmm, fmtPace, r1, esc } from './util.js';
 
-const APP_VERSION = '1.3.0-M4';
+const APP_VERSION = '1.3.1';
 const DEFAULT_ATHLETE = { hr_max: 168, hr_rest: 46, zones: [117, 130, 142, 154] };
 const ICON = { run: '🏃', bike: '🚴', strength: '🏋️', ocr: '🧗', mobility: '🧘', rest: '😴', race: '🏁', walk: '🚶', hike: '🥾', swim: '🏊', other: '•' };
 const ST = { pending: '○', done: '✔', modified: '◐', skipped: '✕' };
@@ -118,7 +118,7 @@ function painRow(p = { loc: 'r_foot', score: 1 }) {
     <select class="pscore">${opt(range(0, 10), p.score, v => v + '/10')}</select><button class="x" data-act="pdel">✕</button></div>`;
 }
 function checkinSummary(c) {
-  const p = [c.rpe != null && `RPE ${c.rpe}`, c.sleep_h != null && `😴 ${c.sleep_h} h${c.sleep_q ? ' · q' + c.sleep_q : ''}`, c.energy != null && `⚡ ${c.energy}/5`, c.rhr && `♥ ${c.rhr}`].filter(Boolean).join(' · ');
+  const p = [c.rpe != null && `RPE ${c.rpe}`, c.sleep_h != null && `😴 ${c.sleep_h} h`, c.energy != null && `⚡ ${c.energy}/5`, c.rhr && `♥ ${c.rhr}`].filter(Boolean).join(' · ');
   const pain = (c.pain || []).filter(x => x.score > 0);
   return `<div>${p || '<span class="muted">–</span>'}</div><div class="${pain.some(x => x.score >= 3) ? 'warn' : pain.length ? 'mild' : 'okt'}">${pain.length ? '🩹 ' + pain.map(x => `${esc(PAIN_LOCS[x.loc] || x.loc)} ${x.score}/10`).join(', ') : '✓ no pain'}</div>${c.note ? `<div class="muted small">📝 ${esc(c.note)}</div>` : ''}`;
 }
@@ -131,7 +131,6 @@ function checkinCard(d) {
   return `<div class="card ci"><b>🩺 Check-in · ${fmtShort(d)}</b>
     <label>Day RPE (effort 1–10)<select id="ci_rpe"><option value="">–</option>${opt(range(1, 10), c?.rpe)}</select></label>
     <label>Sleep (h)<input id="ci_sleep" type="number" inputmode="decimal" step="0.25" min="0" max="14" value="${c?.sleep_h ?? ''}"></label>
-    <label>Sleep quality<select id="ci_sq"><option value="">–</option>${opt(range(1, 5), c?.sleep_q, v => v + '/5')}</select></label>
     <label>Energy<select id="ci_en"><option value="">–</option>${opt(range(1, 5), c?.energy, v => v + '/5')}</select></label>
     <label>Resting HR<input id="ci_rhr" type="number" inputmode="numeric" min="30" max="120" value="${c?.rhr ?? ''}"></label>
     <div class="ph"><b>Pain</b><span class="muted small">${!c && prev.pain?.length ? 'pre-filled from yesterday' : '0 = gone'}</span></div>
@@ -144,7 +143,7 @@ async function saveCheckin() {
   const num = id => { const v = $(id).value; return v === '' ? null : +v; };
   const pain = [...document.querySelectorAll('.prow')].map(r => ({ loc: r.querySelector('.ploc').value, score: +r.querySelector('.pscore').value }))
     .filter((p, i, a) => a.findIndex(q => q.loc === p.loc) === i);
-  const c = { date: S.day, rpe: num('#ci_rpe'), sleep_h: num('#ci_sleep'), sleep_q: num('#ci_sq'), energy: num('#ci_en'), rhr: num('#ci_rhr'),
+  const c = { date: S.day, rpe: num('#ci_rpe'), sleep_h: num('#ci_sleep'), energy: num('#ci_en'), rhr: num('#ci_rhr'),
     pain, note: $('#ci_note').value.trim(), updated_at: new Date().toISOString() };
   await db.put('checkins', c); S.checkins[c.date] = c; S.ciOpen = false; toast('Check-in saved'); render();
 }
@@ -637,6 +636,11 @@ document.addEventListener('touchend', e => {
   if (S.tab === 'today') { S.day = addDays(S.day, dx < 0 ? 1 : -1); render(); }
   else if (S.tab === 'week') { S.weekStart = addDays(S.weekStart, dx < 0 ? 7 : -7); render(); }
 });
+
+// Block zoom: pinch (gesture* events, multi-touch move). iOS may ignore user-scalable=no.
+['gesturestart', 'gesturechange', 'gestureend'].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+document.addEventListener('touchmove', e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
+// Double-tap zoom is disabled via CSS touch-action:manipulation (keeps fast repeated taps working).
 
 let lastDay = today();
 document.addEventListener('visibilitychange', () => { if (!document.hidden && lastDay !== today()) { lastDay = today(); S.day = today(); S.weekStart = mondayOf(today()); S.ciOpen = false; render(); } });

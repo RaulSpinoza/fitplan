@@ -68,7 +68,7 @@ export function buildProgress({ from, to, todayStr, sessions, logs, acts, checki
     });
     const extras = acts.filter(a => a.date === d && !a.session_id).map(a => ({ type: a.type, subtype: a.subtype, ...actual([a]) }));
     const c = ci[d];
-    if (ss.length || extras.length || c) days.push({ date: d, sessions: ss, extras, checkin: c ? { rpe: c.rpe ?? null, sleep_h: c.sleep_h ?? null, sleep_q: c.sleep_q ?? null, energy: c.energy ?? null, rhr: c.rhr ?? null, pain: c.pain || [], note: c.note || null } : null });
+    if (ss.length || extras.length || c) days.push({ date: d, sessions: ss, extras, checkin: c ? { rpe: c.rpe ?? null, sleep_h: c.sleep_h ?? null, energy: c.energy ?? null, rhr: c.rhr ?? null, pain: c.pain || [], note: c.note || null } : null });
   }
   const weeks = [];
   for (let ws = mondayOf(from); ws <= to; ws = addDays(ws, 7)) {
@@ -122,7 +122,7 @@ export function toMarkdown(p) {
     for (const x of d.sessions) parts.push(x.planned.type === 'rest' && !x.actual ? `${x.title} → ${x.status}${x.user_note ? ` – "${x.user_note}"` : ''}` : `${x.title} [${x.planned.duration_min ?? '-'}′${x.planned.hr_zone ? ' Z' + x.planned.hr_zone : ''}] → ${x.status}${x.actual ? ': ' + act(x.actual) : ''}${x.user_note ? ` – "${x.user_note}"` : ''}`);
     for (const e of d.extras) parts.push(`EXTRA ${e.type}: ${act(e)}`);
     const c = d.checkin;
-    if (c) parts.push(`Check-in: ${[c.rpe != null && `RPE ${c.rpe}`, c.sleep_h != null && `sleep ${c.sleep_h} h${c.sleep_q ? ` (q${c.sleep_q})` : ''}`, c.energy != null && `energy ${c.energy}/5`, c.rhr && `RHR ${c.rhr}`,
+    if (c) parts.push(`Check-in: ${[c.rpe != null && `RPE ${c.rpe}`, c.sleep_h != null && `sleep ${c.sleep_h} h`, c.energy != null && `energy ${c.energy}/5`, c.rhr && `RHR ${c.rhr}`,
       c.pain.length ? 'pain ' + c.pain.map(x => `${PAIN_LOCS[x.loc] || x.loc} ${x.score}`).join(', ') : 'no pain', c.note && `"${c.note}"`].filter(Boolean).join(', ')}`);
     L.push(`- **${fmtShort(d.date)}**: ${parts.join(' | ')}`);
   }
