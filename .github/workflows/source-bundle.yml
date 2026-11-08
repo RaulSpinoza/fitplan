@@ -1,0 +1,30 @@
+# Regenerates fitplan-source.txt + version.json on every push to main,
+# so the bundle always matches what GitHub Pages serves.
+name: Source bundle
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['fitplan-source.txt', 'version.json']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: source-bundle
+  cancel-in-progress: true
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build bundle
+        run: python3 tools/bundle.py make
+      - name: Self-test (unpack + byte compare)
+        run: python3 tools/bundle.py selftest
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add fitplan-source.txt version.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "chore: update source bundle [skip ci]"
+          git push
