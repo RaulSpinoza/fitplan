@@ -1,9 +1,9 @@
 {
   "app": "FitPlan",
-  "version": "1.3.0-M4",
-  "source_commit": "ceab86bb07e228fd5d0370bead98605c5790cce2",
-  "generated_at": "2026-11-08T18:38:44Z",
-  "bundle_sha256": "b861945da2621246b41cd5ef2b9af57a0c01a0e6797eebfca0347affc968d61b",
+  "version": "1.3.1",
+  "source_commit": "866a499dec2dbe2402aca594235171704a8170e3",
+  "generated_at": "2026-11-08T18:49:03Z",
+  "bundle_sha256": "bef93008bdbc600def302b31015a848a95d0a6b19a8436612fb1f3c75ec1e524",
   "files": {
     ".github/workflows/source-bundle.yml": {
       "sha256": "1a59a6f79459a7f259f0353e9d7c73655efefdc477cedcf0cbe3d216001e8311",
@@ -14,8 +14,8 @@
       "bytes": 129
     },
     "README.md": {
-      "sha256": "2965e4bc1d6dc997717f24f213b2003ed8b568e226d4fac13844932c851f28e5",
-      "bytes": 1338
+      "sha256": "8b41da8c92c00fe77684d6c94796bf090c51afb62a92112a518ae4529d6cc647",
+      "bytes": 1442
     },
     "docs/SOURCE-PRESERVATION.md": {
       "sha256": "c8d83b896f492ba4f842a7f86c7e95c585a4e0f4a995d649b891c30ea3ce3f6c",
@@ -34,12 +34,12 @@
       "bytes": 2891
     },
     "index.html": {
-      "sha256": "983d675d4940604644ef86caeb5160d2e0ca99c5b2f11a0be4ccf7d8d26121c5",
-      "bytes": 1301
+      "sha256": "cc67c1372570d6e2ba6117da56d764f28cc2a7f30ed8381cc8db73e990850ee7",
+      "bytes": 1353
     },
     "js/app.js": {
-      "sha256": "f6a6769eca9e5c529267cbdd71a56f42fe1fe85525f3d6abdda251d372d73f23",
-      "bytes": 46748
+      "sha256": "e86a1dab16bd2ca0d0ccc3640dc50d261c1383db6948c937c0ad8cb0fc7b567b",
+      "bytes": 47024
     },
     "js/charts.js": {
       "sha256": "60c6a8b1ee61019a4ef1b304f87239b6489b7b8ecfa0d1960c65f8ba3ac59af3",
@@ -66,8 +66,8 @@
       "bytes": 3170
     },
     "js/progress.js": {
-      "sha256": "103c057f89ec4990ee654a481300d6f91085aa59f0e362977742840041a10aaa",
-      "bytes": 10637
+      "sha256": "af1546cf80e80279862146202237c06f70635c90e9b4c70c1e31b86e60d414ad",
+      "bytes": 10571
     },
     "js/trends.js": {
       "sha256": "b6944d8d31586b244f325a9fbf3ac8db80d7b4b0068ec49466c63a718e134e7c",
@@ -86,12 +86,12 @@
       "bytes": 26
     },
     "styles.css": {
-      "sha256": "58e0891a59d24a9116186ddafdc35ffdd9cf46b46a266c92bfc3b97bffb43ab4",
-      "bytes": 8041
+      "sha256": "314218881b3313bc3d1dcf2f1dc48a4405144ce3be11de1a4c39377eb490c716",
+      "bytes": 8146
     },
     "sw.js": {
-      "sha256": "909bcbcfcee350e55fcc9751919e39d6f7aab4fdc312fe542ac43495ab3071d9",
-      "bytes": 882
+      "sha256": "c9dac0b2b8d3cf60d98daaca040e0ebfe62ee0b1d210d09dad0fbf623998f254",
+      "bytes": 879
     },
     "tools/bundle.py": {
       "sha256": "f459c394c1eaabeeea31d95fe0506dc43932b0afc432e28708d6ef0bf89ca8a4",
