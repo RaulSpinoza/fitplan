@@ -8,7 +8,7 @@ import { weeklySeries, loadSeries, easyPaceSeries, wellnessSeries, headline } fr
 import { chart, legend } from './charts.js';
 import { today, addDays, daysBetween, fmt, fmtShort, fmtDM, mondayOf, hhmm, fmtPace, r1, esc } from './util.js';
 
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4.0';
 const DEFAULT_ATHLETE = { hr_max: 168, hr_rest: 46, zones: [117, 130, 142, 154] };
 const ICON = { run: '🏃', bike: '🚴', strength: '🏋️', ocr: '🧗', mobility: '🧘', rest: '😴', race: '🏁', walk: '🚶', hike: '🥾', swim: '🏊', other: '•' };
 const ST = { pending: '○', done: '✔', modified: '◐', skipped: '✕' };
@@ -16,7 +16,7 @@ const ZC = ['#7aa7ff', '#5fd38d', '#f4d35e', '#f59e5b', '#ef5b5b'];
 
 const S = { tab: 'today', day: today(), weekStart: mondayOf(today()), sessions: [], logs: {}, races: [], plans: [], acts: [], checkins: {},
   athlete: DEFAULT_ATHLETE, pendingImport: null, fitStage: null, lastBackup: null, backupFile: null,
-  ciOpen: false, repWin: '14', report: null, lastExport: null, trWeeks: 12 };
+  ciOpen: false, repWin: '14', report: null, lastExport: null, trWeeks: 12, swapFor: null, fitDir: null };
 const $ = sel => document.querySelector(sel);
 const view = () => $('#view');
 
@@ -31,6 +31,8 @@ async function load() {
   S.lastBackup = await db.getMeta('last_backup', null);
   S.lastExport = await db.getMeta('last_export', null);
   S.trWeeks = await db.getMeta('trend_weeks', 12);
+  const fd = await db.getMeta('fit_dir', null);
+  S.fitDir = fd && typeof fd.getDirectoryHandle === 'function' ? fd : null;   // ignore {} from restored backups
 }
 const currentPlan = () => S.plans[S.plans.length - 1];
 const statusOf = id => S.logs[id]?.status || 'pending';
@@ -104,9 +106,52 @@ function sessionCard(s) {
     ${acts.length ? `<div class="actual"><div class="ah">⌚ Actual${log?.auto ? ` <span class="muted small">· auto: ${esc(log.status)} (${esc(log.reason || '')})</span>` : ''}</div>
       ${acts.map(a => `<div class="al">${actSummary(a)}</div>`).join('')}${zoneBar(sumZones(acts.filter(a => a.role !== 'warmup')))}</div>` : ''}
     ${log?.note ? `<div class="lognote">📝 ${esc(log.note)}</div>` : ''}
+    ${swapBadge(s)}
     <div class="acts">${['done', 'modified', 'skipped'].map(x => `<button data-act="status" data-id="${esc(s.id)}" data-st="${x}" class="${st === x ? 'sel ' + x : ''}">${ST[x]} ${x}</button>`).join('')}
-      <button data-act="note" data-id="${esc(s.id)}">📝</button></div>
+      ${s.date === today() && swappable(s) ? `<button class="ib" data-act="swap" data-id="${esc(s.id)}" title="Swap with a future workout">⇄</button>` : ''}
+      <button class="ib" data-act="note" data-id="${esc(s.id)}">📝</button></div>
+    ${S.swapFor === s.id ? swapPicker(s) : ''}
   </div>`;
+}
+
+// ---------- swap (1.4.0) ----------
+// A swap exchanges the two sessions' positions (date, slot AND id), so ids keep matching their date
+// and a later Copilot plan merges correctly. The moved session remembers its original date/id.
+const swappable = s => s.type !== 'race' && statusOf(s.id) === 'pending' && !actsOf(s.id).length;
+function swapBadge(s) {
+  if (!s.swapped_from) return '';
+  const p = S.sessions.find(x => x.id === s.swap_with && x.swap_with === s.id);
+  return `<div class="swapnote">⇄ Moved from ${fmtShort(s.swapped_from)}${s.swap_title ? ` · swapped with “${esc(s.swap_title)}”` : ''}
+    ${p && swappable(s) && swappable(p) ? `<button class="mini" data-act="unswap" data-id="${esc(s.id)}">Undo</button>` : ''}</div>`;
+}
+function swapPicker(s) {
+  const days = [...Array(21)].map((_, i) => addDays(today(), i + 1));
+  const rows = days.map(d => {
+    const c = sessionsOn(d).filter(x => swappable(x));
+    return c.length ? `<div class="swday"><div class="muted small">${fmtShort(d)}</div>${c.map(x => `<button data-act="swapwith" data-a="${esc(s.id)}" data-b="${esc(x.id)}">${ICON[x.type] || '•'} ${esc(x.title)}${x.duration_min ? ` · ${x.duration_min}′` : ''}</button>`).join('')}</div>` : '';
+  }).join('');
+  return `<div class="swapbox"><b>Swap “${esc(s.title)}” with…</b>${rows || '<div class="muted small">No open sessions in the next 21 days.</div>'}
+    <button data-act="swapcancel">Cancel</button></div>`;
+}
+async function doSwap(aId, bId) {
+  const a = S.sessions.find(x => x.id === aId), b = S.sessions.find(x => x.id === bId);
+  if (!a || !b || a === b || !swappable(a) || !swappable(b)) return toast('Only open sessions without imported workouts can be swapped');
+  const move = (s, to, partner) => {
+    const n = { ...s, id: to.id, date: to.date, slot: to.slot, swapped_from: s.swapped_from ?? s.date, original_id: s.original_id ?? s.id,
+      swap_with: partner.id, swap_title: partner.title, swapped_at: new Date().toISOString() };
+    if (n.date === n.swapped_from) ['swapped_from', 'original_id', 'swap_with', 'swap_title', 'swapped_at'].forEach(k => delete n[k]);  // back home
+    return n;
+  };
+  const na = move(a, b, { id: a.id, title: b.title }), nb = move(b, a, { id: b.id, title: a.title });
+  const la = S.logs[a.id], lb = S.logs[b.id];                 // notes travel with their workout
+  const ops = [{ store: 'sessions', put: na }, { store: 'sessions', put: nb }, { store: 'logs', del: a.id }, { store: 'logs', del: b.id }];
+  if (la) ops.push({ store: 'logs', put: { ...la, id: b.id } });
+  if (lb) ops.push({ store: 'logs', put: { ...lb, id: a.id } });
+  await db.batch(ops);
+  S.swapFor = null;
+  await load();
+  await reassignDays([a.date, b.date]);                       // e.g. today's imported workout now matches the swapped-in session
+  toast(na.swapped_from ? `Swapped with ${fmtShort(b.date)}` : 'Swap undone'); render();
 }
 
 // ---------- daily check-in ----------
@@ -130,7 +175,7 @@ function checkinCard(d) {
   const prev = c || S.checkins[addDays(d, -1)] || {};      // prefill pain from yesterday to make tracking fast
   return `<div class="card ci"><b>🩺 Check-in · ${fmtShort(d)}</b>
     <label>Day RPE (effort 1–10)<select id="ci_rpe"><option value="">–</option>${opt(range(1, 10), c?.rpe)}</select></label>
-    <label>Sleep (h)<input id="ci_sleep" type="number" inputmode="decimal" step="0.25" min="0" max="14" value="${c?.sleep_h ?? ''}"></label>
+    <label>Sleep (h)<input id="ci_sleep" class="numtext" type="text" inputmode="decimal" autocomplete="off" placeholder="7.5 or 7:30" value="${c?.sleep_h ?? ''}"></label>
     <label>Energy<select id="ci_en"><option value="">–</option>${opt(range(1, 5), c?.energy, v => v + '/5')}</select></label>
     <label>Resting HR<input id="ci_rhr" type="number" inputmode="numeric" min="30" max="120" value="${c?.rhr ?? ''}"></label>
     <div class="ph"><b>Pain</b><span class="muted small">${!c && prev.pain?.length ? 'pre-filled from yesterday' : '0 = gone'}</span></div>
@@ -139,11 +184,22 @@ function checkinCard(d) {
     <textarea id="ci_note" placeholder="Note (e.g. compression socks, how the foot felt)">${esc(c?.note || '')}</textarea>
     <div class="acts"><button class="primary" data-act="cisave">Save</button><button data-act="ciclose">Cancel</button></div></div>`;
 }
+// Sleep hours: accepts 7.5, 7,5 (German keyboard), 7:30 or 7h30 → 7.5. Returns null (empty), number, or NaN (invalid).
+export function parseHours(v) {
+  v = String(v ?? '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!v) return null;
+  let m = v.match(/^(\d{1,2})(?::|h)(\d{1,2})?$/);
+  const h = m ? +m[1] + (+(m[2] || 0)) / 60 : /^\d{1,2}([.,]\d{1,2})?$/.test(v) ? +v.replace(',', '.') : NaN;
+  return h >= 0 && h <= 16 && (!m || +(m[2] || 0) < 60) ? Math.round(h * 100) / 100 : NaN;
+}
+
 async function saveCheckin() {
   const num = id => { const v = $(id).value; return v === '' ? null : +v; };
+  const sleep = parseHours($('#ci_sleep').value);
+  if (Number.isNaN(sleep)) { toast('Sleep: enter hours like 7.5, 7,5 or 7:30'); $('#ci_sleep').focus(); return; }
   const pain = [...document.querySelectorAll('.prow')].map(r => ({ loc: r.querySelector('.ploc').value, score: +r.querySelector('.pscore').value }))
     .filter((p, i, a) => a.findIndex(q => q.loc === p.loc) === i);
-  const c = { date: S.day, rpe: num('#ci_rpe'), sleep_h: num('#ci_sleep'), energy: num('#ci_en'), rhr: num('#ci_rhr'),
+  const c = { date: S.day, rpe: num('#ci_rpe'), sleep_h: sleep, energy: num('#ci_en'), rhr: num('#ci_rhr'),
     pain, note: $('#ci_note').value.trim(), updated_at: new Date().toISOString() };
   await db.put('checkins', c); S.checkins[c.date] = c; S.ciOpen = false; toast('Check-in saved'); render();
 }
@@ -172,7 +228,7 @@ function renderWeek() {
     const list = sessionsOn(d), races = S.races.filter(r => r.date === d), ex = extrasOn(d), c = S.checkins[d];
     list.forEach(s => { if (s.type !== 'rest') { plan += s.duration_min || 0; if (['done', 'modified'].includes(statusOf(s.id))) done += s.duration_min || 0; } });
     const line = s => { const am = actsOf(s.id).reduce((t, a) => t + a.moving_min, 0);
-      return `<div class="wi st-${statusOf(s.id)}">${ICON[s.type] || '•'} ${esc(s.title)} <span class="muted">${s.duration_min ? s.duration_min + '′' : ''}${am ? ' → ' + Math.round(am) + '′' : ''}</span> <span class="stb">${ST[statusOf(s.id)]}</span></div>`; };
+      return `<div class="wi st-${statusOf(s.id)}">${ICON[s.type] || '•'} ${esc(s.title)}${s.swapped_from ? ' <span class="swapmark" title="moved">⇄</span>' : ''} <span class="muted">${s.duration_min ? s.duration_min + '′' : ''}${am ? ' → ' + Math.round(am) + '′' : ''}</span> <span class="stb">${ST[statusOf(s.id)]}</span></div>`; };
     const mp = c ? Math.max(0, ...(c.pain || []).map(p => p.score)) : null;
     return `<div class="wrow ${d === today() ? 'now' : ''}" data-act="goto" data-d="${d}">
       <div class="wd">${fmtShort(d)}${c ? `<div class="cidot ${mp >= 3 ? 'warn' : mp > 0 ? 'mild' : 'okt'}">🩺${mp ? ' ' + mp : ''}</div>` : ''}</div>
@@ -353,6 +409,21 @@ function fallbackCopy(text) {
 }
 
 // ---------- Import tab ----------
+const canPickDir = () => typeof window.showDirectoryPicker === 'function' && typeof window.showOpenFilePicker === 'function';
+
+// Default FIT folder: real start folder where the browser supports the File System Access API (desktop Chrome/Edge).
+// iOS Safari has no API for this – its Files picker usually reopens the last folder used.
+async function chooseFitDir() {
+  try { S.fitDir = await window.showDirectoryPicker({ id: 'fitplan-fit', mode: 'read' }); await db.setMeta('fit_dir', S.fitDir); toast(`Default folder: ${S.fitDir.name}`); render(); }
+  catch (e) { if (e.name !== 'AbortError') toast('Could not set folder: ' + e.message); }
+}
+async function pickFitFiles() {
+  if (!canPickDir()) return $('#fitfile').click();
+  try {
+    const hs = await window.showOpenFilePicker({ multiple: true, id: 'fitplan-fit', ...(S.fitDir ? { startIn: S.fitDir } : {}) });
+    toast('Reading files…'); stageFit(await Promise.all(hs.map(h => h.getFile())));
+  } catch (e) { if (e.name !== 'AbortError') $('#fitfile').click(); }
+}
 function sessionOptions(date, selected) {
   const opts = sessionsOn(date).filter(s => s.type !== 'rest');
   return `<option value="">➕ Unplanned (extra)</option>` + opts.map(s => `<option value="${esc(s.id)}" ${s.id === selected ? 'selected' : ''}>${ICON[s.type] || '•'} ${esc(s.title)}</option>`).join('');
@@ -363,7 +434,7 @@ function renderImport() {
   const recent = S.acts.slice(-30).reverse();
   view().innerHTML = `<h2>Import workouts</h2>
     <div class="card">
-      <div class="muted small">Pick FIT files from iCloud Drive → RunGap → Exports. Select several at once; duplicates are skipped.</div>
+      <div class="muted small">Pick FIT files from ${S.fitDir ? `<b>${esc(S.fitDir.name)}</b> (default folder)` : 'iCloud Drive → RunGap → Exports'}. Select several at once; duplicates are skipped.</div>
       <button class="primary" data-act="pickfit">⌚ Choose FIT files</button>
       <input type="file" id="fitfile" multiple hidden>
     </div>
@@ -418,6 +489,10 @@ function renderSettings() {
       <div class="muted small">Save to iCloud Drive → FitPlan. iOS may delete web-app data after long non-use.</div>
       <button data-act="backup" id="backupbtn" disabled>💾 Preparing backup…</button>
       <button data-act="pickrestore">♻️ Restore backup</button><input type="file" id="restorefile" accept=".json,application/json" hidden></div>
+    <div class="card"><b>FIT import folder</b>
+      ${canPickDir() ? `<div class="${S.fitDir ? 'okt' : 'muted'}">${S.fitDir ? `Default: 📁 ${esc(S.fitDir.name)}` : 'No default folder set'}</div>
+        <button data-act="fitdir">📁 Choose default folder</button>${S.fitDir ? '<button data-act="fitdirclear">Clear</button>' : ''}`
+      : `<div class="muted small">On iPhone/iPad, web apps can't set the folder the Files picker opens in – iOS doesn't provide that option. The picker usually reopens the last folder you used.<br><b>Tip:</b> in the Files app, long-press <b>RunGap › Exports</b> and choose <b>Favorite</b>. It then appears under Favorites in the picker sidebar, one tap away.</div>`}</div>
     <div class="card"><b>Athlete</b>
       <label>Max HR <input id="hrmax" type="number" inputmode="numeric" value="${a.hr_max}"></label>
       <label>Resting HR <input id="hrrest" type="number" inputmode="numeric" value="${a.hr_rest}"></label>
@@ -432,7 +507,8 @@ function renderSettings() {
 
 // ---------- backup (file prepared before the tap so iOS allows the share sheet) ----------
 async function prepareBackup() {
-  const data = { schema: 'fitplan.backup/1.0', app_version: APP_VERSION, created_at: new Date().toISOString(), data: await db.dump() };
+  const dump = await db.dump(); dump.meta = dump.meta.filter(m => m.key !== 'fit_dir');
+  const data = { schema: 'fitplan.backup/1.0', app_version: APP_VERSION, created_at: new Date().toISOString(), data: dump };
   S.backupFile = new File([JSON.stringify(data)], `fitplan-backup-${today()}.json`, { type: 'application/json' });
   const btn = $('#backupbtn'); if (btn) { btn.disabled = false; btn.textContent = '💾 Export backup'; }
 }
@@ -575,14 +651,20 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act],[data-tab]'); if (!el || el.tagName === 'SELECT') return;
-  if (el.dataset.tab) { S.tab = el.dataset.tab; S.ciOpen = false; if (S.tab === 'today') S.day = today(); return render(); }
+  if (el.dataset.tab) { S.tab = el.dataset.tab; S.ciOpen = false; S.swapFor = null; if (S.tab === 'today') S.day = today(); return render(); }
   const { act } = el.dataset;
-  if (act === 'day') { const n = +el.dataset.n; S.day = n === 0 ? today() : addDays(S.day, n); S.ciOpen = false; render(); }
+  if (act === 'day') { const n = +el.dataset.n; S.day = n === 0 ? today() : addDays(S.day, n); S.ciOpen = false; S.swapFor = null; render(); }
   else if (act === 'week') { const n = +el.dataset.n; S.weekStart = n === 0 ? mondayOf(today()) : addDays(S.weekStart, n); render(); }
   else if (act === 'goto') { S.day = el.dataset.d; S.tab = 'today'; S.ciOpen = false; render(); }
   else if (act === 'trw') { S.trWeeks = +el.dataset.n; await db.setMeta('trend_weeks', S.trWeeks); render(); }
   else if (act === 'status') setStatus(el.dataset.id, el.dataset.st);
   else if (act === 'note') setNote(el.dataset.id);
+  else if (act === 'swap') { S.swapFor = S.swapFor === el.dataset.id ? null : el.dataset.id; render(); setTimeout(() => $('.swapbox')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50); }
+  else if (act === 'swapcancel') { S.swapFor = null; render(); }
+  else if (act === 'swapwith') doSwap(el.dataset.a, el.dataset.b);
+  else if (act === 'unswap') { const s = S.sessions.find(x => x.id === el.dataset.id); if (s && confirm('Undo this swap?')) doSwap(s.id, s.swap_with); }
+  else if (act === 'fitdir') chooseFitDir();
+  else if (act === 'fitdirclear') { S.fitDir = null; await db.setMeta('fit_dir', null); toast('Default folder cleared'); render(); }
   else if (act === 'ciopen') { S.ciOpen = true; render(); setTimeout(() => $('.ci')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50); }
   else if (act === 'ciclose') { S.ciOpen = false; render(); }
   else if (act === 'cisave') saveCheckin();
@@ -591,7 +673,7 @@ document.addEventListener('click', async e => {
   else if (act === 'copyrep') copyReport();
   else if (act === 'sharemd') shareFile(S.report.mdFile);
   else if (act === 'sharejson') shareFile(S.report.jsonFile);
-  else if (act === 'pickfit') $('#fitfile').click();
+  else if (act === 'pickfit') pickFitFiles();
   else if (act === 'applyfit') applyFit();
   else if (act === 'cancelfit') { S.fitStage = null; render(); }
   else if (act === 'delact') deleteAct(el.dataset.id);
@@ -637,7 +719,7 @@ document.addEventListener('touchend', e => {
   else if (S.tab === 'week') { S.weekStart = addDays(S.weekStart, dx < 0 ? 7 : -7); render(); }
 });
 
-// Block zoom: pinch (gesture* events, multi-touch move). iOS may ignore user-scalable=no.
+// Block zoom: pinch (gesture* events, multi-touch move).
 ['gesturestart', 'gesturechange', 'gestureend'].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
 document.addEventListener('touchmove', e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
 // Double-tap zoom is disabled via CSS touch-action:manipulation (keeps fast repeated taps working).

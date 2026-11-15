@@ -64,7 +64,8 @@ export function buildProgress({ from, to, todayStr, sessions, logs, acts, checki
       else if (status === 'pending' && d < todayStr) status = 'missed';
       return { plan_id: s.id, title: s.title, status, status_source: log.status && log.status !== 'pending' ? (log.auto ? 'auto' : 'user') : null,
         planned: { type: s.type, subtype: s.subtype || null, duration_min: s.duration_min || null, distance_km: s.distance_km || null, hr_zone: s.target?.hr_zone || null },
-        actual: actual(a), user_note: log.note || null };
+        actual: actual(a), user_note: log.note || null,
+        swapped: s.swapped_from ? { original_date: s.swapped_from, original_id: s.original_id || null, swapped_with: s.swap_title || null } : null };
     });
     const extras = acts.filter(a => a.date === d && !a.session_id).map(a => ({ type: a.type, subtype: a.subtype, ...actual([a]) }));
     const c = ci[d];
@@ -96,7 +97,10 @@ export function buildProgress({ from, to, todayStr, sessions, logs, acts, checki
       sessions_planned: winSessions.filter(s => s.planned.type !== 'rest').length,
       done: winSessions.filter(s => s.status === 'done').length, modified: winSessions.filter(s => s.status === 'modified').length,
       skipped: winSessions.filter(s => s.status === 'skipped').length, missed: winSessions.filter(s => s.status === 'missed').length,
-      checkin_days: Object.keys(ci).length, load: loadRatio(acts, to), flags: painFlags(Object.values(ci))
+      checkin_days: Object.keys(ci).length, load: loadRatio(acts, to), flags: painFlags(Object.values(ci)),
+      // all swaps touching the window or the future (also upcoming moved sessions beyond `to`)
+      swaps: sessions.filter(s => s.swapped_from && (s.date >= from || s.swapped_from >= from)).sort((a, b) => a.date.localeCompare(b.date))
+        .map(s => ({ plan_id: s.id, original_id: s.original_id || null, title: s.title, original_date: s.swapped_from, new_date: s.date, swapped_with: s.swap_title || null }))
     },
     weeks, days
   };
@@ -112,6 +116,10 @@ export function toMarkdown(p) {
   L.push(`Sessions: ${s.sessions_planned} planned · ${s.done} done · ${s.modified} modified · ${s.skipped} skipped · ${s.missed} missed · check-ins ${s.checkin_days}/${p.window.days}`);
   L.push(`Load (TRIMP): last 7 d ${s.load.acute_7d} · 28-d weekly avg ${s.load.chronic_28d_weekly} · ACWR ${s.load.acwr ?? `n/a (${s.load.history_days} d history, needs 28)`}`);
   L.push(`Flags: ${s.flags.length ? s.flags.join('; ') : 'none'}`);
+  if (s.swaps?.length) {
+    L.push('', '## Swapped sessions (moved by athlete)');
+    for (const w of s.swaps) L.push(`- ${w.title}: planned ${fmtShort(w.original_date)} → moved to ${fmtShort(w.new_date)}${w.swapped_with ? ` (swapped with "${w.swapped_with}")` : ''}`);
+  }
   L.push('', '## Weeks', '| Week | Compl. | Hours | Run km | D+ | TRIMP | Zone min Z1–Z5 | Easy pace | RPE | Sleep h | RHR | Max pain |', '|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const w of p.weeks) L.push(`| ${w.week}${w.partial ? '*' : ''} | ${w.compliance_pct ?? '-'}% | ${w.moving_h} | ${w.run_km} | ${w.ascent_m} | ${w.trimp} | ${zTxt(w.zone_min)} | ${w.easy_pace_min_km ?? '-'} | ${w.avg_rpe ?? '-'} | ${w.avg_sleep_h ?? '-'} | ${w.avg_rhr ?? '-'} | ${w.max_pain ?? '-'} |`);
   if (p.weeks.some(w => w.partial)) L.push('*partial week');
@@ -119,7 +127,7 @@ export function toMarkdown(p) {
   const act = a => a ? [`${Math.round(a.moving_min)}′`, a.distance_km && `${a.distance_km} km`, a.pace_min_km && `${a.pace_min_km}/km`, a.avg_hr && `HR ${a.avg_hr}/${a.max_hr}`, a.ascent_m && `D+ ${a.ascent_m}`, `Z ${zTxt(a.zone_min)}`, `TRIMP ${a.trimp}`].filter(Boolean).join(', ') : '';
   for (const d of p.days) {
     const parts = [];
-    for (const x of d.sessions) parts.push(x.planned.type === 'rest' && !x.actual ? `${x.title} → ${x.status}${x.user_note ? ` – "${x.user_note}"` : ''}` : `${x.title} [${x.planned.duration_min ?? '-'}′${x.planned.hr_zone ? ' Z' + x.planned.hr_zone : ''}] → ${x.status}${x.actual ? ': ' + act(x.actual) : ''}${x.user_note ? ` – "${x.user_note}"` : ''}`);
+    for (const x of d.sessions) parts.push(x.planned.type === 'rest' && !x.actual ? `${x.title} → ${x.status}${x.user_note ? ` – "${x.user_note}"` : ''}` : `${x.title} [${x.planned.duration_min ?? '-'}′${x.planned.hr_zone ? ' Z' + x.planned.hr_zone : ''}] → ${x.status}${x.swapped ? ` [⇄ moved from ${fmtShort(x.swapped.original_date)}]` : ''}${x.actual ? ': ' + act(x.actual) : ''}${x.user_note ? ` – "${x.user_note}"` : ''}`);
     for (const e of d.extras) parts.push(`EXTRA ${e.type}: ${act(e)}`);
     const c = d.checkin;
     if (c) parts.push(`Check-in: ${[c.rpe != null && `RPE ${c.rpe}`, c.sleep_h != null && `sleep ${c.sleep_h} h`, c.energy != null && `energy ${c.energy}/5`, c.rhr && `RHR ${c.rhr}`,
@@ -131,6 +139,8 @@ export function toMarkdown(p) {
 
 export const ASSESS_PROMPT = `Assess my progress using this FitPlan progress report (schema fitplan.progress/1.0).
 Report: (1) compliance & load trend vs. plan, (2) aerobic marker (easy pace at Z2 HR), (3) intensity distribution vs. target,
-(4) pain/recovery flags, (5) readiness for the next race. Then tell me if the plan needs changes; if yes, output an updated
-plan as ONE JSON code block in schema fitplan.plan/1.0 (plan_version = current + 1, valid_from = first changed date,
-only sessions from valid_from onward, keep race IDs).`;
+(4) pain/recovery flags, (5) readiness for the next race. Sessions marked "swapped"/"⇄ moved" were moved by me to another
+day: evaluate them on the day they were actually scheduled, consider why I may have moved them (fatigue, pain, schedule),
+and keep my swaps in the updated plan unless there is a training reason not to. Then tell me if the plan needs changes;
+if yes, output an updated plan as ONE JSON code block in schema fitplan.plan/1.0 (plan_version = current + 1,
+valid_from = first changed date, only sessions from valid_from onward, session id = "<date>-<slot>", keep race IDs).`;

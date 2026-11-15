@@ -12,6 +12,7 @@ Change files, bump `VERSION` in `sw.js`, commit. The app shows "New version avai
 Start each session by attaching `fitplan-source.txt` (see docs/SOURCE-PRESERVATION.md).
 
 ## Changelog
+- 1.4.0: sleep hours with decimals (7.5, 7,5, 7:30); swap today's workout with a future one (⇄, undo, shown in Today/Week, reported to Copilot); default FIT folder in Settings (browsers with File System Access API; iOS shows Favorites tip).
 - 1.3.1: daily check-in without sleep quality; header no longer rendered as GPU layer (blur fix); zoom blocked (viewport + pinch/double-tap guard).
 - 1.3.0-M4: Trends tab (4/12/26 weeks): weekly hours by zone vs. planned, run km & D+, TRIMP acute/chronic + ACWR band, aerobic marker (easy pace at Z2 HR), pain / resting HR / sleep, weekly table, 4-week vs. previous 4-week KPIs. Settings moved to ⚙️ in the header. Countdown card links to Races.
 - 1.2.0-M3: daily check-in (RPE, sleep, energy, resting HR, pain map, note); Report tab with progress.md / progress.json (fitplan.progress/1.0), copy prompt + report for Copilot, pain flags, ACWR load ratio.
